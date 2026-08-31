@@ -21,12 +21,31 @@ python3 -V          # -> Python 3.13.12
 
 ---
 
-## 1. Get the code
+## 1. Get the code — **two repositories**
+
+The research package and the webapp live in separate repos, and **this one does not run on
+its own**: `shared/hindi_patches.py` imports `dedup` and `web_agent`, `ui.py` imports
+`engine`, and `rsb_search/pipeline.py` imports `crawler` — all of which are the webapp's.
+Clone the webapp first, then this repo *inside* it as `research/`:
 
 ```bash
 git clone https://github.com/aimonitors25/railway-agent.git
 cd railway-agent
+git clone https://github.com/TechieTripathi/hindi-railway-web-rsb.git research
 ```
+
+| repo | holds | remote |
+|---|---|---|
+| `railway-agent` | the Flask webapp — `app.py`, `config.py`, `engine.py`, `crawler.py`, `dedup.py`, `web_agent.py`, `templates/` | `aimonitors25/railway-agent` |
+| `railway-agent/research` | this package — the two pipelines, the shared metrics, the control panel, all docs | `TechieTripathi/hindi-railway-web-rsb` |
+
+The directory **must be named `research`**: the root README and every command below assume
+it, and `shared/provenance.py` records `git status -- research` for run provenance.
+
+> Because `research/` is a nested repository, **it does not inherit the parent's
+> `.gitignore`.** Anything that must never be committed has to be listed in
+> `research/.gitignore` — which is why `.env` is the first entry there. An `.env` holding
+> live API keys reached a local commit once because it was not.
 
 ---
 
@@ -200,13 +219,20 @@ use the line above instead.)
 ## Where things live
 
 ```
-app.py config.py engine.py …   the webapp (flat, at the repo root)
-templates/                     its Flask templates
-research/                      the research package and its own UI on :5001
-research/docs/                 all documentation (this file included)
-tests/                         pytest suite, with fixtures/
-data/    logs/                 generated state — gitignored
-archive/                       superseded source, kept for reference
+railway-agent/                      <- repo 1: aimonitors25/railway-agent
+├── app.py config.py engine.py …      the webapp (flat, at the root)
+├── templates/                        its Flask templates
+├── tests/                            pytest suite, with fixtures/
+├── data/  logs/                      generated state — gitignored
+├── archive/                          superseded source, kept for reference
+└── research/                       <- repo 2: TechieTripathi/hindi-railway-web-rsb
+    ├── web_search/  rsb_search/      one folder per pipeline (config + pipeline)
+    ├── shared/                       Devanagari, webapp patches, grounded metrics
+    ├── notebooks/                    the four research notebooks
+    ├── ui.py  ui_templates/          control panel on :5001, drives both pipelines
+    ├── experiment.py                 run either pipeline with config overrides
+    ├── docs/                         all documentation (this file included)
+    └── output/                       scraped corpora, scores, logs — gitignored
 ```
 
 Commands in this guide are still run from the **repo root** (`railway-agent/`), one level

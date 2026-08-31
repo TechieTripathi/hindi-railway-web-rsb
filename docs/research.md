@@ -1,6 +1,8 @@
 # Research Notebooks & Modules
 
-Research code for the Railway Agent, kept deliberately separate from the Flask webapp.
+Research code for the Railway Agent, kept deliberately separate from the Flask webapp —
+separate directory *and* separate repository (`TechieTripathi/hindi-railway-web-rsb`,
+cloned as `research/` inside `aimonitors25/railway-agent`). See [SETUP.md](SETUP.md).
 
 **Nothing here modifies the webapp.** `web_agent.py`, `dedup.py`, `engine.py`, `crawler.py`,
 `app.py` and `config.py` are imported read-only. Where webapp behaviour must change for a

@@ -20,6 +20,10 @@ Metrics fall into four groups, and the distinction is the point of this document
 | [3. Webapp-computed](#3-webapp-computed) | `engine._compute_plagiarism` | yes, mechanically |
 | [4. Grounded](#4-grounded-research) | `research/shared/grounding.py` | yes, deterministically |
 
+> Links below of the form `../../engine.py` point at the **webapp** repo
+> (`aimonitors25/railway-agent`), which this package sits inside as `research/`. They
+> resolve in a full checkout; on GitHub's view of this repository alone they will not.
+
 ---
 
 ## 1. Crawl stage
