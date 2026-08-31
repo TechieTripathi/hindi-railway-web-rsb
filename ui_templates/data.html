@@ -1,0 +1,156 @@
+{% extends "_base.html" %}
+{% block title %}{{ pipeline }} · {{ stage_label }}{% endblock %}
+
+{% block headerextra %}
+<span class="faint tiny mono">{{ file }}</span>
+{% endblock %}
+
+{% block body %}
+<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:6px">
+  <h2 style="margin:0; font-size:15px">{{ title }}</h2>
+  <a class="btn btn-sm" href="/data/{{ 'rsb' if pipeline == 'web' else 'web' }}"
+     style="text-decoration:none">switch to {{ 'official press releases' if pipeline == 'web' else 'Hindi publishers' }}</a>
+</div>
+<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px">
+  <span class="dim small">Show:</span>
+  {% for s in stages %}
+    <a href="/data/{{ pipeline }}?stage={{ s.key }}" class="pill"
+       style="text-decoration:none;
+              color:{{ 'var(--accent)' if s.key == stage else 'var(--dim)' }};
+              border-color:{{ 'var(--accent)' if s.key == stage else 'var(--line)' }}">
+      {{ s.label }} · {{ s.count }}
+    </a>
+  {% endfor %}
+  <span style="flex:1"></span>
+  <form method="get" action="/data/{{ pipeline }}" style="display:flex; gap:6px">
+    <input type="hidden" name="stage" value="{{ stage }}">
+    <input name="q" value="{{ q }}" placeholder="filter title / body / source"
+           style="font:inherit; background:#0e1116; color:var(--ink); width:230px;
+                  border:1px solid var(--line); border-radius:4px; padding:4px 8px">
+    <button type="submit" style="padding:4px 12px">filter</button>
+    {% if q %}<a href="/data/{{ pipeline }}?stage={{ stage }}" class="dim"
+                 style="align-self:center; font-size:12.5px">clear</a>{% endif %}
+  </form>
+</div>
+
+<p class="dim small" style="margin:0 0 10px">
+  Showing <strong>{{ rows|length }}</strong> of {{ total }} article(s){% if q %}
+  matching “{{ q }}”{% endif %}. The <em>content</em> column is shortened — click
+  <span style="color:var(--accent)">full →</span> on any row to read the whole thing.
+</p>
+
+<details class="panel" style="padding:11px 15px; margin-bottom:14px">
+  <summary>What do these columns mean?</summary>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+              gap:9px 22px; margin-top:11px" class="small">
+    <div><strong>source</strong> — which publisher or railway zone it came from.</div>
+    <div><strong>source page</strong> — the listing page the article was found on. Open
+         this first when a publisher changes their site layout.</div>
+    <div><strong>article URL</strong> — the page the text was read from.</div>
+    <div><strong>content</strong> — the opening of the article body, shortened.</div>
+    <div><strong>chars</strong> — how much body text was extracted. Orange under 300
+         means extraction probably failed quietly.</div>
+    {% if pipeline == 'web' %}
+    <div><strong>extractor</strong> — which rule found the text. Orange
+         <code>generic</code> means that site's specific rule stopped working.</div>
+    {% else %}
+    <div><strong>body hi</strong> — how much of the text is actually Devanagari. Some
+         zones publish Hindi headlines over English text.</div>
+    {% endif %}
+    <div><strong>story</strong> — whether the AI has written this one yet.</div>
+    <div><strong>fact/cov</strong> — the AI's own confidence score, then the measured
+         share of source figures it carried over. Full definitions in
+         <code>research/docs/METRICS.md</code>.</div>
+  </div>
+</details>
+
+{% if not rows %}
+  <div class="panel" style="padding:18px">
+    <p class="dim" style="margin:0">
+      {% if q %}No article matches “{{ q }}”.
+        <a href="/data/{{ pipeline }}?stage={{ stage }}">Clear the filter</a>.
+      {% else %}Nothing here yet — this stage has not been run.
+        <a href="/">Go and run it →</a>{% endif %}
+    </p>
+  </div>
+{% else %}
+<div class="panel" style="overflow-x:auto">
+<table style="border-collapse:collapse; width:100%; font-size:13px">
+  <thead>
+    <tr style="text-align:left; color:var(--dim); border-bottom:1px solid var(--line)">
+      <th style="padding:9px 10px">#</th>
+      <th style="padding:9px 10px">source</th>
+      <th style="padding:9px 10px" title="The listing page this article was found on">source page</th>
+      <th style="padding:9px 10px" title="The page the article text was read from">article URL</th>
+      <th style="padding:9px 10px">date</th>
+      <th style="padding:9px 10px; min-width:240px">title</th>
+      <th style="padding:9px 10px; min-width:300px">content</th>
+      <th style="padding:9px 10px">chars</th>
+      {% if pipeline == 'web' %}<th style="padding:9px 10px">extractor</th>
+      {% else %}<th style="padding:9px 10px">body hi</th>{% endif %}
+      {% if stage != 'crawl' %}<th style="padding:9px 10px">story</th>{% endif %}
+      {% if stage == 'scored' %}<th style="padding:9px 10px">fact/cov</th>{% endif %}
+      <th style="padding:9px 10px"></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr style="border-bottom:1px solid var(--line); vertical-align:top">
+      <td style="padding:9px 10px" class="dim">{{ r.i }}</td>
+      <td style="padding:9px 10px; white-space:nowrap" title="{{ r.source }}">{{ r.source_label }}</td>
+      <td style="padding:9px 10px; white-space:nowrap">
+        {% if r.listing %}
+          <a href="{{ r.listing }}" target="_blank" rel="noreferrer" class="mono tiny"
+             style="color:{{ 'var(--accent)' if r.listing_exact else 'var(--warn)' }}"
+             title="{{ r.listing }}&#10;&#10;{{ 'Recorded at crawl time.' if r.listing_exact
+                        else 'Not recorded on this article — resolved from the source config, so it is a guess.' }}">
+            {{ r.listing_label }}</a>{% if not r.listing_exact %} <span class="warn" title="guessed">*</span>{% endif %}
+        {% else %}<span class="dim">—</span>{% endif %}
+      </td>
+      <td style="padding:9px 10px; white-space:nowrap">
+        <a href="{{ r.link }}" target="_blank" rel="noreferrer" class="mono tiny"
+           title="{{ r.link }}" style="color:var(--accent)">{{ r.link_label }}</a>
+      </td>
+      <td style="padding:9px 10px; white-space:nowrap">{{ r.date or '—' }}</td>
+      <td style="padding:9px 10px; max-width:300px">{{ r.title }}</td>
+      <td class="dim" style="padding:9px 10px; max-width:440px">{{ r.snippet }}</td>
+      <td style="padding:9px 10px" class="{{ 'warn' if r.short }}"
+          title="{{ 'under 300 chars — extraction likely failed silently' if r.short }}">
+        {{ r.chars }}{% if r.short %} ⚠{% endif %}
+      </td>
+      {% if pipeline == 'web' %}
+        <td style="padding:9px 10px" class="{{ 'warn' if r.generic }}"
+            title="{{ 'generic <p> sweep — this domain’s selector has drifted' if r.generic }}">
+          {{ r.extractor or '—' }}</td>
+      {% else %}
+        <td style="padding:9px 10px" class="{{ '' if r.is_hindi else 'warn' }}">
+          {{ '%.0f%%'|format((r.body_hindi or 0) * 100) }}</td>
+      {% endif %}
+      {% if stage != 'crawl' %}
+        <td style="padding:9px 10px" class="{{ 'ok' if r.has_story else 'err' }}">
+          {{ 'yes' if r.has_story else 'no' }}</td>
+      {% endif %}
+      {% if stage == 'scored' %}
+        <td style="padding:9px 10px; white-space:nowrap"
+            class="{{ '' if r.gates_passed else 'warn' }}">
+          {{ r.fact if r.fact is not none else '—' }} /
+          {{ r.coverage if r.coverage is not none else '—' }}
+          {%- if not r.gates_passed %} ⚠{% endif %}</td>
+      {% endif %}
+      <td style="padding:9px 10px; white-space:nowrap">
+        <a href="/data/{{ pipeline }}/{{ r.i }}?stage={{ stage }}"
+           style="color:var(--accent)">full →</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="dim tiny" style="margin-top:10px">
+  <span class="warn">*</span> source page not recorded on this article — resolved from
+  <code>hindi_railway_sources.json</code> / <code>config_rsb.ZONES</code> by name, so it
+  is a best guess. Crawls run after this UI was added record the exact
+  <code>listing_url</code>.
+</p>
+{% endif %}
+{% endblock %}

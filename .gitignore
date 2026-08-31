@@ -1,0 +1,29 @@
+# research/ is its own git repository, so it does NOT inherit the parent repo's
+# .gitignore. Everything that must never be committed has to be listed HERE.
+# (An .env with live API keys reached a local commit once because it was not.)
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Virtual environment ──────────────────────────────────────────────────────
+.venv/
+venv/
+
+# ── Scraped corpora and generated scores — reproducible, and large ────────────
+output/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
+# ── Notebooks ────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Logs and stray shell output ──────────────────────────────────────────────
+*.log
+nohup.out
+.env
+.env
+.env

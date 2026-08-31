@@ -1,0 +1,77 @@
+{% extends "_base.html" %}
+{% block title %}{{ pipeline }} #{{ index }}{% endblock %}
+
+{% block headerextra %}
+<span class="dim">{{ file }} · article {{ index }} of {{ count }}</span>
+{% endblock %}
+
+{% block body %}
+<div style="display:flex; gap:12px; align-items:center; margin-bottom:14px; flex-wrap:wrap">
+  <a href="/data/{{ pipeline }}?stage={{ stage }}" style="color:var(--accent)">← back to the table</a>
+  <span style="flex:1"></span>
+  {% if index > 0 %}
+    <a href="/data/{{ pipeline }}/{{ index - 1 }}?stage={{ stage }}"
+       style="color:var(--accent)">← {{ index - 1 }}</a>
+  {% else %}<span class="dim">← prev</span>{% endif %}
+  <span class="dim">{{ index }} / {{ count - 1 }}</span>
+  {% if index + 1 < count %}
+    <a href="/data/{{ pipeline }}/{{ index + 1 }}?stage={{ stage }}"
+       style="color:var(--accent)">{{ index + 1 }} →</a>
+  {% else %}<span class="dim">next →</span>{% endif %}
+</div>
+
+<section class="panel" style="padding:16px; margin-bottom:16px">
+  <h2 style="margin:0 0 10px; font-size:15px; line-height:1.4">{{ art.title }}</h2>
+  <div style="font-size:12.5px; display:grid; grid-template-columns:130px 1fr;
+              gap:5px 12px; overflow-wrap:anywhere">
+    <span class="dim">source</span><span>{{ art.source or '—' }}</span>
+    <span class="dim">source page</span>
+    <span>
+      {% if listing %}
+        <a href="{{ listing }}" target="_blank" rel="noreferrer"
+           style="color:{{ 'var(--accent)' if listing_exact else 'var(--warn)' }}">{{ listing }}</a>
+        {% if not listing_exact %}
+          <span class="warn">· guessed from the source config, not recorded on this article</span>
+        {% endif %}
+      {% else %}<span class="dim">—</span>{% endif %}
+    </span>
+    <span class="dim">article URL</span>
+    <span><a href="{{ art.link }}" target="_blank" rel="noreferrer"
+             style="color:var(--accent)">{{ art.link }}</a></span>
+    <span class="dim">date</span><span>{{ art.date or '—' }}</span>
+  </div>
+</section>
+
+{% for label, text in texts %}
+<section class="panel" style="margin-bottom:14px">
+  <div style="display:flex; gap:10px; align-items:baseline; padding:10px 14px;
+              border-bottom:1px solid var(--line)">
+    <strong style="font-size:13px">{{ label }}</strong>
+    <span class="dim" style="font-size:12px">{{ text|length }} chars</span>
+  </div>
+  <pre style="padding:14px; margin:0; font-size:13px; line-height:1.7; color:#dbe1ea;
+              max-height:60vh; overflow:auto">{{ text }}</pre>
+</section>
+{% endfor %}
+
+<section class="panel">
+  <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
+    <strong style="font-size:13px">all other fields</strong>
+    <span class="dim" style="font-size:12px">as stored in {{ file }}</span>
+  </div>
+  <table style="border-collapse:collapse; width:100%; font-size:12.5px">
+    {% for k, v in fields %}
+    <tr style="border-bottom:1px solid var(--line)">
+      <td class="dim" style="padding:7px 14px; width:210px; vertical-align:top">{{ k }}</td>
+      <td style="padding:7px 14px; overflow-wrap:anywhere">
+        {%- if v is sameas true %}<span class="ok">true</span>
+        {%- elif v is sameas false %}<span class="err">false</span>
+        {%- elif v == '' or v is none %}<span class="dim">—</span>
+        {%- elif v is sequence and v is not string %}{{ v|join(', ') or '—' }}
+        {%- else %}{{ v }}{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}

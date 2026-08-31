@@ -1,0 +1,37 @@
+# Research-only dependencies. The webapp's root requirements.txt is untouched.
+#
+# Install:
+#   .venv/bin/python3 -m pip install -r research/requirements-research.txt
+#
+# Use `python3 -m pip`, not `.venv/bin/pip3` — the venv's console scripts carry a
+# stale shebang from a drive remount and will not execute.
+#
+# This list is deliberately complete and standalone: research/ must install without
+# the root requirements.txt.
+
+# --- crawling -------------------------------------------------------------
+requests>=2.20
+beautifulsoup4>=4.9
+lxml>=4.6                 # BeautifulSoup's "xml" parser, used for RSS listings
+
+# --- Devanagari normalisation --------------------------------------------
+# Unifies precomposed vs combining nukta (हावड़ा appears both ways in one corpus) and
+# strips ZWJ. Plain regex cannot do this. Falls back to unicodedata NFC if absent,
+# which handles the nukta but not the ZWJ.
+indic-nlp-library>=0.92
+
+# --- pulled in transitively, listed so this file stands alone -------------
+httpx>=0.23               # engine.generate_news -> Anthropic API
+python-dotenv>=1.0        # config.py loads ANTHROPIC_API_KEY from .env
+
+# --- notebooks ------------------------------------------------------------
+# `jupyter` is a metapackage; installing it does NOT give you a frontend on its own if
+# a partial install left only jupyter-core behind. `jupyter lab` needs jupyterlab.
+# VS Code needs neither -- it drives the kernel through ipykernel.
+jupyter>=1.0
+jupyterlab>=4.0
+ipykernel>=6.0
+
+# --- research control panel (research/ui.py) -----------------------------
+# The webapp already depends on flask, but research/ must install standalone.
+flask>=2.0

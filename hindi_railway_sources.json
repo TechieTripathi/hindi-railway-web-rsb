@@ -1,0 +1,200 @@
+{
+ "purpose": "Hindi railway information sources for research crawling",
+ "created_for": "research pipeline source discovery",
+ "source_groups": {
+  "web_search_sources": {
+   "description": "Sources to use with the Web News research pipeline. These are discovered through search/RSS/article pages rather than the RSB zone crawler.",
+   "sources": [
+    {
+     "name": "PIB Hindi",
+     "category": "official_government",
+     "language": "hi",
+     "priority": 1,
+     "start_urls": [
+      "https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=2&Regid=3",
+      "https://www.pib.gov.in/indexd.aspx"
+     ],
+     "search_keywords": [
+      "site:pib.gov.in रेलवे मंत्रालय हिंदी",
+      "site:pib.gov.in भारतीय रेलवे हिंदी प्रेस विज्ञप्ति"
+     ],
+     "notes": "Official Hindi railway/ministry releases. Listing is all-ministry (Railways = ddlMinistry id 23, reachable only via ASP.NET postback), so railway releases are sparse; relevance filter selects them. PressReleaseDetail.aspx is a JS shell - use PressReleasePage/IframePage.",
+     "crawl_difficulty": "easy_medium",
+     "crawler_notes": "direct: RSS gives PressReleaseIframePage PRID links (server-rendered)"
+    },
+    {
+     "name": "Live Hindustan Indian Railways",
+     "category": "news",
+     "language": "hi",
+     "priority": 2,
+     "start_urls": [
+      "https://www.livehindustan.com/tags/indian-railways"
+     ],
+     "search_keywords": [
+      "site:livehindustan.com Indian Railways हिंदी",
+      "site:livehindustan.com रेलवे खबर"
+     ],
+     "notes": "Good Hindi railway tag page with recent local and national railway updates.",
+     "crawl_difficulty": "easy_medium"
+    },
+    {
+     "name": "Amar Ujala Indian Railways",
+     "category": "news",
+     "language": "hi",
+     "priority": 3,
+     "start_urls": [
+      "https://www.amarujala.com/tags/indian-railways"
+     ],
+     "search_keywords": [
+      "site:amarujala.com Indian Railways हिंदी",
+      "site:amarujala.com रेलवे समाचार"
+     ],
+     "notes": "Good Hindi railway tag page. Article extraction may need site-specific selectors.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "AajTak Indian Railways",
+     "category": "news",
+     "language": "hi",
+     "priority": 4,
+     "start_urls": [
+      "https://www.aajtak.in/topic/indian-railways"
+     ],
+     "search_keywords": [
+      "site:aajtak.in Indian Railways हिंदी",
+      "site:aajtak.in रेलवे खबर"
+     ],
+     "notes": "High-volume Hindi railway topic page. Pages can be heavier and may need cleanup.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "Navbharat Times Railway",
+     "category": "news",
+     "language": "hi",
+     "priority": 5,
+     "start_urls": [
+      "https://navbharattimes.indiatimes.com/business/railway/articlelist/93207908.cms"
+     ],
+     "search_keywords": [
+      "site:navbharattimes.indiatimes.com railway हिंदी",
+      "site:navbharattimes.indiatimes.com रेलवे समाचार"
+     ],
+     "notes": "Hindi railway news listing from Navbharat Times.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "Jansatta Indian Railways",
+     "category": "news",
+     "language": "hi",
+     "priority": 6,
+     "start_urls": [
+      "https://www.jansatta.com/about/indian-railways/"
+     ],
+     "search_keywords": [
+      "site:jansatta.com Indian Railways हिंदी",
+      "site:jansatta.com रेलवे खबर"
+     ],
+     "notes": "Hindi Indian Railways topic page.",
+     "crawl_difficulty": "medium"
+    }
+   ]
+  },
+  "rsb_sources": {
+   "description": "Sources for the Official Railway / RSB research pipeline. research/rsb_pipeline.py rewrites the listing URL to lang=1 (Hindi); config.ZONES uses lang=0 (English). Hindi coverage is NOT uniform across zones - measured 2026-08-31, see hindi_coverage.",
+   "sources": [
+    {
+     "name": "Northern Railway Press Releases",
+     "category": "official_railway_zone",
+     "language": "hi_en_mixed",
+     "priority": 1,
+     "crawler_zone_code": "NR",
+     "start_urls": [
+      "https://nr.indianrailways.gov.in/view_section.jsp?id=0%2C4%2C268&lang=0"
+     ],
+     "notes": "Hindi titles, but bodies are usually English. Use body_hindi_ratio to filter.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "Central Railway Press Releases",
+     "category": "official_railway_zone",
+     "language": "hi_en_mixed",
+     "priority": 2,
+     "crawler_zone_code": "CR",
+     "start_urls": [
+      "https://cr.indianrailways.gov.in/view_section.jsp?lang=0&id=0,4,268"
+     ],
+     "notes": "Full Hindi edition at lang=1 - titles and bodies both Devanagari.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "Western Railway Press Releases",
+     "category": "official_railway_zone",
+     "language": "hi_en_mixed",
+     "priority": 3,
+     "crawler_zone_code": "WR",
+     "start_urls": [
+      "https://wr.indianrailways.gov.in/view_section.jsp?lang=0&id=0,4,268"
+     ],
+     "notes": "Full Hindi edition at lang=1 - titles and bodies both Devanagari.",
+     "crawl_difficulty": "medium"
+    },
+    {
+     "name": "Indian Railways Hindi Magazine",
+     "category": "official_railway_reference",
+     "language": "hi",
+     "priority": 4,
+     "crawler_zone_code": null,
+     "start_urls": [
+      "https://indianrailways.gov.in/HindiMagazine.html"
+     ],
+     "notes": "Official Indian Railways Hindi magazine page. Useful for Hindi terminology, but not directly handled by crawler.py because it is not a zone press-release listing.",
+     "crawl_difficulty": "medium"
+    }
+   ],
+   "hindi_coverage_measured_2026_08_31": {
+    "CR": {
+     "titles": "hindi",
+     "bodies": "hindi (95-100%)",
+     "usable": true
+    },
+    "WR": {
+     "titles": "hindi",
+     "bodies": "hindi (97-99%)",
+     "usable": true
+    },
+    "NR": {
+     "titles": "hindi",
+     "bodies": "mixed - 1 of 3 Hindi, rest English",
+     "usable": "partial"
+    },
+    "ECoR": {
+     "titles": "empty",
+     "bodies": "placeholder 'Add Hindi content here'",
+     "usable": false
+    },
+    "SCR": {
+     "titles": "empty",
+     "bodies": "placeholder 'Add Hindi content here'",
+     "usable": false
+    },
+    "_note": "ECoR/SCR publish an unfilled Hindi template; the zone has not translated its releases."
+   }
+  }
+ },
+ "recommended_order": {
+  "web_search_sources": [
+   "PIB Hindi",
+   "Live Hindustan Indian Railways",
+   "Amar Ujala Indian Railways",
+   "AajTak Indian Railways",
+   "Navbharat Times Railway",
+   "Jansatta Indian Railways"
+  ],
+  "rsb_sources": [
+   "Northern Railway Press Releases",
+   "Central Railway Press Releases",
+   "Western Railway Press Releases",
+   "Indian Railways Hindi Magazine"
+  ]
+ }
+}

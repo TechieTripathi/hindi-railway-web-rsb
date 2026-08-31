@@ -1,0 +1,28 @@
+[33m579dbfb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m first commit
+ .gitignore                       |   6 [32m+[m
+ __init__.py                      |  21 [32m++[m
+ config_env.py                    | 201 [32m++++++++++[m
+ config_rsb.py                    | 162 [32m++++++++[m
+ config_web.py                    | 128 [32m+++++++[m
+ experiment.py                    | 202 [32m++++++++++[m
+ grounding.py                     | 263 [32m+++++++++++++[m
+ hindi_patches.py                 | 127 [32m+++++++[m
+ hindi_pipeline.py                | 381 [32m+++++++++++++++++++[m
+ hindi_railway_sources.json       | 200 [32m++++++++++[m
+ hindi_text.py                    | 227 [32m+++++++++++[m
+ provenance.py                    | 111 [32m++++++[m
+ requirements-research.txt        |  37 [32m++[m
+ rsb_bilinguality_metrics.ipynb   | 176 [32m+++++++++[m
+ rsb_pipeline.py                  | 233 [32m++++++++++++[m
+ rsb_pipeline_research.ipynb      | 300 [32m+++++++++++++++[m
+ score_report.py                  | 102 [32m+++++[m
+ test_hindi_text.py               | 122 [32m++++++[m
+ ui.py                            | 831 [32m+++++++++++++++++++++++++++++++++++++++++[m
+ ui_templates/_base.html          | 123 [32m++++++[m
+ ui_templates/data.html           | 156 [32m++++++++[m
+ ui_templates/detail.html         |  77 [32m++++[m
+ ui_templates/index.html          | 301 [32m+++++++++++++++[m
+ ui_templates/logs.html           |  56 [32m+++[m
+ web_bilinguality_metrics.ipynb   | 181 [32m+++++++++[m
+ web_news_pipeline_research.ipynb | 373 [32m++++++++++++++++++[m
+ 26 files changed, 5097 insertions(+)

@@ -1,0 +1,301 @@
+{% extends "_base.html" %}
+{% block title %}Run the pipeline{% endblock %}
+
+{% block headerextra %}
+<span class="chip {{ 'chip-ok' if key.set else 'chip-err' }}"
+      title="Where the Anthropic API key came from. Only step 2 uses it.">
+  {{ 'AI key ready' if key.set else 'No AI key — step 2 will not run' }}
+  <span class="faint tiny">{{ key.source }}</span>
+</span>
+{% endblock %}
+
+{% block body %}
+
+<section class="panel" id="intro" style="padding:16px 18px; margin-bottom:20px">
+  <div style="display:flex; gap:12px; align-items:flex-start">
+    <div style="flex:1">
+      <strong style="font-size:14px">New here? This runs in three steps.</strong>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr));
+                  gap:12px; margin-top:12px">
+        {% for k in ['crawl','generate','score'] %}
+        {% set m = pipelines[0].steps[loop.index0].meta %}
+        <div style="display:flex; gap:10px">
+          <span class="chip" style="height:22px">{{ m.n }}</span>
+          <div>
+            <div style="font-weight:600; font-size:13.5px">{{ m.label }}</div>
+            <div class="dim small">{{ m.what }}</div>
+            <div class="faint tiny" style="margin-top:3px">Takes {{ m.time }}.</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="dim small" style="margin:13px 0 0">
+        Pick a pipeline below and click the steps in order. <strong>Nothing runs until you
+        click</strong>, and only step&nbsp;2 costs money. Everything is written under
+        <code class="tiny">research/output/</code> — your app's own files are never touched.
+      </p>
+    </div>
+    <button class="btn-sm" onclick="document.getElementById('intro').remove();
+              try{localStorage.setItem('hideIntro','1')}catch(e){}"
+            title="Hide this">Got it</button>
+  </div>
+</section>
+
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(470px,1fr)); gap:20px">
+{% for p in pipelines %}
+  <section class="panel" data-pipeline="{{ p.name }}">
+    <div style="padding:16px 18px; border-bottom:1px solid var(--line)">
+      <h2 style="margin:0 0 4px; font-size:15px">{{ p.title }}</h2>
+      <p class="dim small" style="margin:0">{{ p.friendly }}</p>
+      <details style="margin-top:8px">
+        <summary>Why it works this way</summary>
+        <p class="dim small" style="margin:7px 0 0">{{ p.blurb }}</p>
+      </details>
+    </div>
+
+    <div style="padding:12px 18px; border-bottom:1px solid var(--line);
+                display:flex; gap:18px; flex-wrap:wrap; align-items:center">
+      {% for prm in p.params %}
+      <label class="small dim" style="display:flex; gap:7px; align-items:center">
+        {% if prm.type == 'checkbox' %}
+          <input type="checkbox" data-param="{{ prm.key }}" {{ 'checked' if prm.default }}>
+          {{ prm.label }}
+        {% else %}
+          {{ prm.label }}
+          <input type="number" min="1" max="50" data-param="{{ prm.key }}" value="{{ prm.default }}">
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+
+    {% for s in p.steps %}
+    <div style="display:flex; gap:13px; padding:15px 18px;
+                {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}
+                {% if s.is_next %}background:var(--accent-soft);{% endif %}">
+      <span class="chip {{ 'chip-next' if s.is_next else ('chip-ok' if s.view else '') }}"
+            style="height:23px; min-width:26px; justify-content:center">
+        {{ '✓' if s.view and not s.is_next else s.meta.n }}
+      </span>
+
+      <div style="flex:1; min-width:0">
+        <div style="display:flex; gap:9px; align-items:baseline; flex-wrap:wrap">
+          <strong style="font-size:14px">{{ s.meta.label }}</strong>
+          {% if s.meta.costs_money %}
+            <span class="chip chip-warn" title="This step calls the Claude API, which is billed.">costs money</span>
+          {% endif %}
+          {% if s.is_next %}<span class="chip chip-next">do this next</span>{% endif %}
+        </div>
+        <div class="dim small" style="margin-top:2px">{{ s.meta.what }}</div>
+
+        <div class="small" style="margin-top:7px">
+          {% if s.view %}
+            <span class="ok">✓ {{ s.detail }}</span>
+            · <a href="/data/{{ p.name }}?stage={{ {'crawl':'crawl','generate':'agency','score':'scored'}[s.key] }}">see the {{ s.view }} articles →</a>
+          {% elif s.why %}
+            <span class="dim">Locked — {{ s.why }}.</span>
+          {% else %}
+            <span class="dim">Not run yet. Gives you {{ s.meta.produces }}.</span>
+          {% endif %}
+        </div>
+        {% if s.artifact.note %}
+          <div class="warn small">⚠ {{ s.artifact.name }}: {{ s.artifact.note }}</div>
+        {% endif %}
+        <div class="faint tiny" style="margin-top:4px">
+          Takes {{ s.meta.time }}{% if s.artifact.exists %} · last run {{ s.artifact.when }}{% endif %}
+        </div>
+      </div>
+
+      <button data-step="{{ s.key }}" data-label="{{ s.meta.label }}"
+              data-money="{{ 1 if s.meta.costs_money else 0 }}"
+              class="{{ 'btn-primary' if s.is_next }}"
+              {{ 'disabled' if not s.enabled }}
+              title="{{ s.why or s.meta.what }}"
+              style="align-self:flex-start; min-width:118px">
+        {% if s.view %}Run again{% else %}{{ s.meta.label.split(' ')[0] }}{% endif %}
+      </button>
+    </div>
+    {% endfor %}
+  </section>
+{% endfor %}
+</div>
+
+<section class="panel" id="livepanel" style="margin-top:20px">
+  <div class="panel-head">
+    <strong>What's happening</strong>
+    <span id="statusline" class="dim small">Nothing running. Click a step above to start.</span>
+    <span class="spacer"></span>
+    <span id="elapsed" class="faint tiny"></span>
+    <div id="viewtoggle" style="display:none; gap:4px">
+      <button class="btn-sm" id="btn-highlights">Key lines</button>
+      <button class="btn-sm" id="btn-all">Everything</button>
+    </div>
+    <a id="fulllog" class="small" href="/logs">open in run history →</a>
+  </div>
+
+  <div id="progwrap" style="display:none; padding:13px 16px 0">
+    <div class="bar" id="bar"><i></i></div>
+    <div style="display:flex; gap:14px; margin-top:8px; flex-wrap:wrap" class="small">
+      <span id="p-phase" class="dim"></span>
+      <span class="spacer"></span>
+      <span id="p-kept" class="ok"></span>
+      <span id="p-skipped" class="dim"></span>
+      <span id="p-warn" class="warn"></span>
+    </div>
+  </div>
+
+  <pre id="log" class="mono" style="padding:14px 16px; max-height:48vh; overflow:auto;
+       font-size:12.5px; line-height:1.65"><span class="faint">Output appears here line by line, and is saved to research/output/logs/ so you can read it later.</span></pre>
+
+  <div id="summary" style="padding:0 16px 15px"></div>
+</section>
+
+<script>
+let jobId = null, offset = 0, poll = null, mode = 'highlights';
+const $ = id => document.getElementById(id);
+const logEl = $('log'), statusEl = $('statusline'), sumEl = $('summary');
+const fullLog = $('fulllog');
+
+const KEY_LINE = /^(===|Wrote |Done\.|backed up |key:|run_|engine\.run_generate|extractor|body chars|distinct values|gate failures|rescore_file|AI generating|WARNING|SKIP|Error|FAILED|Traceback|\s+---)/;
+const BAD_LINE = /WARNING|FAILED|Traceback|Error|SKIP:/;
+
+function classify(line) {
+  if (/^\s*---\s*FAILED|Traceback/.test(line)) return 'err';
+  if (BAD_LINE.test(line)) return 'warn';
+  if (/^\s+OK\s/.test(line)) return 'ok';
+  if (/^\s+skip \(/.test(line)) return 'faint';
+  if (/^===/.test(line)) return 'strong';
+  return '';
+}
+
+function render(lines) {
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 40;
+  for (const line of lines) {
+    const cls = classify(line);
+    if (mode === 'highlights' && !KEY_LINE.test(line) && cls !== 'err' && cls !== 'warn') continue;
+    const el = document.createElement('span');
+    if (cls === 'strong') { el.style.fontWeight = '650'; }
+    else if (cls) { el.className = cls; }
+    el.textContent = line + '\n';
+    logEl.appendChild(el);
+  }
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setMode(m) {
+  mode = m;
+  $('btn-highlights').className = 'btn-sm' + (m === 'highlights' ? ' btn-primary' : '');
+  $('btn-all').className = 'btn-sm' + (m === 'all' ? ' btn-primary' : '');
+  if (!allLines.length) return;
+  logEl.textContent = '';
+  render(allLines);
+}
+let allLines = [];
+$('btn-highlights').onclick = () => setMode('highlights');
+$('btn-all').onclick = () => setMode('all');
+
+function params(section) {
+  const out = {};
+  section.querySelectorAll('[data-param]').forEach(el => {
+    out[el.dataset.param] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  return out;
+}
+
+document.querySelectorAll('section[data-pipeline]').forEach(section => {
+  const pipeline = section.dataset.pipeline;
+  section.querySelectorAll('button[data-step]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.money === '1') {
+        if (!confirm('“' + btn.dataset.label + '” sends every fetched article to Claude, '
+                   + 'which is billed to your API key.\n\nAlready-written articles are '
+                   + 'skipped automatically, so only new ones are charged.\n\nContinue?')) return;
+      }
+      document.querySelectorAll('button[data-step]').forEach(b => b.disabled = true);
+      logEl.textContent = ''; sumEl.textContent = ''; allLines = []; offset = 0;
+      $('viewtoggle').style.display = 'flex';
+      setMode('highlights');
+      const r = await fetch(`/run/${pipeline}/${btn.dataset.step}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(params(section)),
+      });
+      const j = await r.json();
+      if (j.error) {
+        statusEl.innerHTML = '<span class="err">' + j.error + '</span>';
+        document.querySelectorAll('button[data-step]').forEach(b => b.disabled = false);
+        return;
+      }
+      jobId = j.job_id;
+      attach(btn.dataset.label);
+    });
+  });
+});
+
+function attach(label) {
+  statusEl.innerHTML = '<span class="spin"></span> ' + (label || 'Running') + '…';
+  $('progwrap').style.display = 'block';
+  $('bar').classList.add('indet');
+  clearInterval(poll);
+  poll = setInterval(tick, 700);
+  tick();
+}
+
+async function tick() {
+  if (!jobId) return;
+  const r = await fetch(`/api/log/${jobId}?offset=${offset}`);
+  const j = await r.json();
+  if (j.lines && j.lines.length) {
+    allLines = allLines.concat(j.lines);
+    render(j.lines);
+    offset = j.offset;
+  }
+  const p = j.progress || {};
+  $('p-phase').textContent = p.phase || '';
+  $('p-kept').textContent = p.kept ? '✓ ' + p.kept + ' kept' : '';
+  $('p-skipped').textContent = p.skipped ? p.skipped + ' skipped (off-topic or too short)' : '';
+  $('p-warn').textContent = p.warnings ? '⚠ ' + p.warnings + ' worth a look' : '';
+  $('elapsed').textContent = j.elapsed ? j.elapsed + 's' : '';
+  if (p.total) {
+    $('bar').classList.remove('indet');
+    $('bar').firstChild.style.width = Math.round(100 * p.done / p.total) + '%';
+  }
+
+  if (j.state !== 'running') {
+    clearInterval(poll); poll = null;
+    $('bar').classList.remove('indet');
+    $('bar').firstChild.style.width = '100%';
+    const good = j.state === 'ok';
+    statusEl.innerHTML = (good ? '<span class="ok">✓ Finished</span>'
+                               : '<span class="err">✕ Failed</span>')
+                       + ' <span class="faint">in ' + j.elapsed + 's</span>';
+    sumEl.innerHTML = '<div class="chip ' + (good ? 'chip-ok' : 'chip-err')
+      + '" style="white-space:normal; text-align:left">' + esc(j.summary || j.error || '') + '</div>'
+      + (good ? '' : '<p class="small dim" style="margin:9px 0 0">Switch to '
+                   + '<strong>Everything</strong> above to see the full output.</p>');
+    fullLog.href = '/logs?f=' + encodeURIComponent(j.log_name || '');
+    setTimeout(() => location.reload(), 1400);
+  }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+try { if (localStorage.getItem('hideIntro')) $('intro')?.remove(); } catch (e) {}
+
+(async () => {
+  const j = await (await fetch('/api/state')).json();
+  if (j.current) {
+    jobId = j.current;
+    $('viewtoggle').style.display = 'flex';
+    setMode('highlights');
+    attach('Running');
+  } else if (j.recent && j.recent.length) {
+    const last = j.recent[0], good = last.state === 'ok';
+    statusEl.innerHTML = 'Last run: <strong>' + esc(last.step_label || last.step) + '</strong> '
+      + (good ? '<span class="ok">✓</span>' : '<span class="err">✕</span>')
+      + ' <span class="faint">' + last.started + ' · ' + last.seconds + 's</span>';
+    sumEl.innerHTML = '<span class="small ' + (good ? 'dim' : 'err') + '">'
+      + esc(last.summary || last.error || '') + '</span>';
+    fullLog.href = '/logs?f=' + encodeURIComponent(last.log_name || '');
+  }
+})();
+</script>
+{% endblock %}

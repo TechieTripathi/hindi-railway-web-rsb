@@ -1,0 +1,56 @@
+{% extends "_base.html" %}
+{% block title %}Run history{% endblock %}
+
+{% block headerextra %}
+<span class="faint tiny">{{ files|length }} run(s) recorded</span>
+{% endblock %}
+
+{% block body %}
+<div style="display:grid; grid-template-columns:minmax(240px,300px) 1fr; gap:18px;
+            align-items:start">
+
+  <section class="panel" style="overflow:hidden">
+    <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
+      <strong style="font-size:14px">Past runs</strong>
+      <span class="faint tiny">newest first</span>
+    </div>
+    {% if not files %}
+      <p class="dim small" style="padding:15px; margin:0">
+        No runs yet. <a href="/">Run a step →</a>
+      </p>
+    {% endif %}
+    {% for f in files %}
+      <a href="/logs?f={{ f.name }}"
+         style="display:block; padding:9px 14px; text-decoration:none; font-size:12.5px;
+                border-bottom:1px solid var(--line);
+                color:{{ 'var(--accent)' if f.name == current else 'var(--ink)' }};
+                background:{{ '#222a36' if f.name == current else 'transparent' }}">
+        {{ f.name.split('-')[2:] | join('-') | replace('.log','') }}
+        <div class="dim">{{ f.when }} · {{ (f.size / 1024) | round(1) }} kB</div>
+      </a>
+    {% endfor %}
+  </section>
+
+  <div>
+    {% if warnings %}
+    <section class="panel" style="margin-bottom:14px; border-color:#4a3a22">
+      <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
+        <strong style="font-size:14px" class="warn">{{ warnings|length }} line(s) worth reading</strong>
+        <span class="faint tiny">warnings, skips and errors — read these first</span>
+      </div>
+      <pre class="warn mono" style="padding:13px 15px; font-size:12.5px;
+           max-height:30vh; overflow:auto">{{ warnings | join('\n') }}</pre>
+    </section>
+    {% endif %}
+
+    <section class="panel">
+      <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
+        <strong style="font-size:14px" class="mono">{{ current or 'no run selected' }}</strong>
+        <span class="faint tiny">full output</span>
+      </div>
+      <pre class="mono" style="padding:13px 15px; font-size:12.5px; line-height:1.65;
+                  max-height:70vh; overflow:auto">{{ body }}</pre>
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Railway research{% endblock %}</title>
+<style>
+  :root {
+    --bg:#f4f6f8; --panel:#ffffff; --panel2:#f8fafc; --line:#e2e6ec;
+    --ink:#1b1f24; --dim:#61707f; --faint:#8b98a6;
+    --accent:#2563eb; --accent-soft:#eef4ff; --accent-line:#c3d7fb;
+    --ok:#12805c; --ok-soft:#e7f7f0; --warn:#a1600a; --warn-soft:#fdf3e2;
+    --err:#c0342c; --err-soft:#fdeceb;
+    --radius:10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#14171c; --panel:#1c2027; --panel2:#22272f; --line:#2e343d;
+      --ink:#e7ebf0; --dim:#98a5b4; --faint:#77848f;
+      --accent:#75a8ff; --accent-soft:#1d2837; --accent-line:#33455f;
+      --ok:#5ed6a4; --ok-soft:#16291f; --warn:#f0b45a; --warn-soft:#2b2317;
+      --err:#ff8a80; --err-soft:#2c1c1c;
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+         "Helvetica Neue", Arial, "Noto Sans Devanagari", sans-serif;
+  }
+  code, pre, .mono { font-family:var(--mono); }
+  a { color:var(--accent); }
+  h1,h2,h3 { line-height:1.3; }
+
+  header {
+    background:var(--panel); border-bottom:1px solid var(--line);
+    padding:0 22px; position:sticky; top:0; z-index:20;
+  }
+  .hrow { display:flex; gap:20px; align-items:center; min-height:56px; flex-wrap:wrap; }
+  .brand { font-size:15px; font-weight:650; margin:0; letter-spacing:-.01em; }
+  nav { display:flex; gap:4px; }
+  nav a {
+    text-decoration:none; color:var(--dim); font-size:14px; font-weight:500;
+    padding:6px 11px; border-radius:7px;
+  }
+  nav a:hover { background:var(--panel2); color:var(--ink); }
+  nav a[aria-current] { background:var(--accent-soft); color:var(--accent); }
+  .spacer { flex:1; }
+
+  main { padding:22px; max-width:1560px; margin:0 auto; }
+
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); }
+  .panel-head {
+    display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+    padding:13px 16px; border-bottom:1px solid var(--line);
+  }
+  .panel-head strong { font-size:14px; font-weight:620; }
+
+  .dim { color:var(--dim); } .faint { color:var(--faint); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
+  .small { font-size:13px; }
+  .tiny { font-size:12px; }
+
+  .chip {
+    display:inline-flex; align-items:center; gap:5px; border-radius:999px;
+    padding:2px 9px; font-size:12px; font-weight:550; white-space:nowrap;
+    background:var(--panel2); color:var(--dim); border:1px solid var(--line);
+  }
+  .chip-ok   { background:var(--ok-soft);   color:var(--ok);   border-color:transparent; }
+  .chip-warn { background:var(--warn-soft); color:var(--warn); border-color:transparent; }
+  .chip-err  { background:var(--err-soft);  color:var(--err);  border-color:transparent; }
+  .chip-next { background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line); }
+
+  button, .btn {
+    font:inherit; font-size:14px; font-weight:550; cursor:pointer;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:9px 15px; white-space:nowrap;
+  }
+  button:hover:not(:disabled), .btn:hover { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .btn-primary {
+    background:var(--accent); border-color:var(--accent); color:#fff;
+    box-shadow:0 1px 3px rgba(37,99,235,.28);
+  }
+  .btn-primary:hover:not(:disabled) { filter:brightness(1.07); color:#fff; }
+  .btn-sm { padding:5px 11px; font-size:13px; }
+
+  input[type=number], input[type=text] {
+    font:inherit; font-size:14px; background:var(--panel); color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:6px 9px;
+  }
+  input[type=number] { width:78px; }
+  input:focus { outline:2px solid var(--accent-line); outline-offset:0; border-color:var(--accent); }
+
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; }
+  details > summary { cursor:pointer; color:var(--dim); font-size:13px; }
+  details > summary:hover { color:var(--accent); }
+
+  .spin {
+    display:inline-block; width:13px; height:13px; border-radius:50%;
+    border:2px solid var(--accent-line); border-top-color:var(--accent);
+    animation:spin .7s linear infinite; vertical-align:-2px;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .bar { height:6px; background:var(--panel2); border-radius:999px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--accent); width:0;
+             transition:width .35s ease; border-radius:999px; }
+  .bar.indet > i { width:34%; animation:slide 1.5s ease-in-out infinite; }
+  @keyframes slide { 0%{margin-left:-34%} 100%{margin-left:100%} }
+</style>
+<header>
+  <div class="hrow">
+    <h1 class="brand">🚆 Railway research</h1>
+    <nav>
+      <a href="/" {% if nav == 'panel' %}aria-current="page"{% endif %}>Run the pipeline</a>
+      <a href="/data/web" {% if nav == 'data' %}aria-current="page"{% endif %}>Browse articles</a>
+      <a href="/logs" {% if nav == 'logs' %}aria-current="page"{% endif %}>Run history</a>
+    </nav>
+    <span class="spacer"></span>
+    {% block headerextra %}{% endblock %}
+  </div>
+</header>
+<main>{% block body %}{% endblock %}</main>
