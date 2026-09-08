@@ -89,7 +89,9 @@ DEFAULT_ZONE_CODES = ["CR", "WR", "NCR", "NER"]
 
 # ------------------------------------------------------- crawl defaults
 
-PER_ZONE = 3                # releases taken per zone per run
+# Per-zone cap. OFF by default, same reasoning as the web side.
+LIMIT_PER_ZONE = False
+PER_ZONE = 3                # only applied when LIMIT_PER_ZONE is True
 
 # CRIS pages are terser than news sites, so this is lower than config_web's 300.
 # Do NOT lower it further to admit zones like NWR: their short "bodies" are the title
@@ -98,6 +100,13 @@ PER_ZONE = 3                # releases taken per zone per run
 # and produce exactly the 150-220 char garbage this pipeline exists to avoid.
 MIN_BODY_CHARS = 200
 HINDI_ONLY = False          # True drops articles whose BODY is not majority Devanagari
+
+# How many days back from today a crawl accepts, when the caller does not say.
+DAYS_BACK = 7
+
+# Zone listings always carry a date, so an undated release means a parse failure
+# rather than a publisher habit. Kept and counted, same as the web side.
+KEEP_UNDATED = True
 HINDI_BODY_THRESHOLD = 0.5  # body_hindi_ratio at or above this counts as Hindi
 
 # Request pacing comes from the webapp's crawler (SLEEP_LISTING / SLEEP_DETAIL) so the

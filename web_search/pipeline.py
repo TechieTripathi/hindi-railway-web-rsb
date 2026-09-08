@@ -60,8 +60,11 @@ DEFAULT_OUT_FILE = CFG.CRAWL_OUTPUT
 #
 # The single-tier substring match this replaces admitted a PIB *sports* release with
 # zero railway content, because 'कोच' matched "मुख्य कोच गौतम गंभीर" (cricket coach).
+from shared.datewindow import Window     # noqa: E402
+from shared.hindi_text import normalise_key  # noqa: E402
 from shared.hindi_text import (  # noqa: E402
     is_railway_relevant,
+    passes_topic,
     STRONG_TERMS,
     WEAK_TERMS,
 )
@@ -269,23 +272,47 @@ def load_sources():
 
 
 def crawl_source(session, source, max_articles=None, relevance_filter=None,
-                 min_body=None, verbose=True, delay=None):
+                 keywords=None, keyword_mode="narrow",
+                 min_body=None, verbose=True, delay=None, window=None,
+                 keep_undated=None, stats=None, seen_keys=None):
     """Crawl one source's tag pages directly and return article dicts.
 
     Unset arguments fall back to web_search/config.py.
+
+    `window` is a shared.datewindow.Window. It is applied AFTER the body fetch,
+    because the publication date lives in the article page's meta tags, not on the
+    listing — there is nothing to filter on until the page is fetched. Articles
+    whose page carries no date at all are kept when `keep_undated`, and counted in
+    `stats` either way so the run can report them.
     """
-    max_articles = CFG.MAX_PER_SOURCE if max_articles is None else max_articles
+    # max_articles=None means UNCAPPED — take everything on the listing that passes
+    # the relevance and date filters. The old default silently capped every run at 3.
+    if max_articles is None:
+        max_articles = CFG.MAX_PER_SOURCE if CFG.LIMIT_PER_SOURCE else float("inf")
     relevance_filter = CFG.RELEVANCE_FILTER if relevance_filter is None else relevance_filter
     min_body = CFG.MIN_BODY_CHARS if min_body is None else min_body
     delay = CFG.REQUEST_DELAY if delay is None else delay
+    keep_undated = CFG.KEEP_UNDATED if keep_undated is None else keep_undated
+    window = window or Window.open()
+    if stats is None:
+        stats = {}
+    # Seen-key set for the whole run, not per listing page. PIB carries the same
+    # release on both of its start_urls under different URLs, so a per-listing
+    # `seen` set stored it twice — a verifier saw the same story twice.
+    if seen_keys is None:
+        seen_keys = set()
     out = []
     for tag_url in source.get("start_urls", []):
         if len(out) >= max_articles:
             break
         # PIB's listing is all-ministry, so railway releases are sparse — scan
         # far more candidates there and let the relevance filter do the work.
-        cand_limit = (CFG.PIB_CANDIDATE_LIMIT if "pib.gov.in" in tag_url
-                      else max_articles * CFG.CANDIDATE_MULTIPLIER)
+        if "pib.gov.in" in tag_url:
+            cand_limit = CFG.PIB_CANDIDATE_LIMIT
+        elif max_articles == float("inf"):
+            cand_limit = CFG.LISTING_SCAN_LIMIT
+        else:
+            cand_limit = int(max_articles) * CFG.CANDIDATE_MULTIPLIER
         try:
             urls = discover_article_urls(session, tag_url, limit=cand_limit)
         except Exception as e:
@@ -307,11 +334,45 @@ def crawl_source(session, source, max_articles=None, relevance_filter=None,
                 time.sleep(delay)
                 continue
             title = _title_from(session, url, body)
-            if relevance_filter and not is_railway_relevant(title, body[:600]):
+            # User keywords narrow (or replace) the built-in railway test; with none
+            # supplied `passes_topic` is exactly `is_railway_relevant`.
+            if relevance_filter and not passes_topic(
+                    keywords, keyword_mode, title, body[:600]):
                 if verbose:
-                    print("     skip (not railway) {}".format(title[:55]))
+                    why = "not railway" if not keywords else (
+                        "no keyword match" if keyword_mode == "only"
+                        else "not railway / no keyword match")
+                    print("     skip ({}) {}".format(why, title[:55]))
+                stats["off_topic"] = stats.get("off_topic", 0) + 1
                 time.sleep(delay)
                 continue
+
+            page_date = ext["page_date"] or ""
+            verdict = window.contains(page_date)
+            if verdict is None:
+                stats["undated"] = stats.get("undated", 0) + 1
+                if not keep_undated:
+                    if verbose:
+                        print("     skip (no date on page) {}".format(title[:45]))
+                    time.sleep(delay)
+                    continue
+            elif not verdict:
+                stats["too_old"] = stats.get("too_old", 0) + 1
+                if verbose:
+                    print("     skip (dated {}, outside {}) {}".format(
+                        page_date, window.describe(), title[:35]))
+                time.sleep(delay)
+                continue
+            key = normalise_key(title)
+            if key and key in seen_keys:
+                stats["duplicate"] = stats.get("duplicate", 0) + 1
+                if verbose:
+                    print("     skip (already have this story) {}".format(title[:42]))
+                time.sleep(delay)
+                continue
+            if key:
+                seen_keys.add(key)
+
             out.append({
                 "title": title,
                 "link": ext["real_url"],
@@ -357,29 +418,80 @@ def _title_from(session, url, body):
 
 
 def run_hindi_crawl(sources=None, max_per_source=None, relevance_filter=None,
-                    out_file=None, verbose=True):
+                    out_file=None, verbose=True, days=None, date_from=None,
+                    date_to=None, source_names=None, keep_undated=None,
+                    keywords=None, keyword_mode="narrow"):
     """Crawl every Hindi source directly and write research JSON.
+
+    Date window, in order of precedence:
+        date_from / date_to   an explicit range
+        days                  the last N days, inclusive of today
+        (neither)             CFG.DAYS_BACK
+
+    Pass days=0 for no date filter at all.
+    `source_names` selects a subset of publishers by name; None means all.
+
+    `keywords` is a list of user terms an article must match to be kept.
+    `keyword_mode` is "narrow" (railway AND keyword) or "only" (keyword alone).
+    An empty list leaves the built-in railway relevance test as the sole filter.
 
     Returns the list of article dicts. Never touches project-root files.
     """
     sources = sources if sources is not None else load_sources()
-    max_per_source = CFG.MAX_PER_SOURCE if max_per_source is None else max_per_source
+    if source_names:
+        wanted = {n.strip().lower() for n in source_names}
+        sources = [s for s in sources if s["name"].lower() in wanted]
+        if not sources:
+            raise ValueError("no source matched %s. Available: %s"
+                             % (sorted(wanted), [s["name"] for s in load_sources()]))
+    # None propagates to crawl_source, which reads the LIMIT_PER_SOURCE toggle.
     out_file = out_file or CFG.CRAWL_OUTPUT
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
 
+    if date_from or date_to:
+        window = Window(start=date_from, end=date_to)
+    elif days is not None and int(days) == 0:
+        window = Window.open()
+    else:
+        window = Window.last_days(CFG.DAYS_BACK if days is None else days)
+
     session = requests.Session()
-    articles = []
+    articles, stats, seen_keys = [], {}, set()
+    if verbose:
+        cap = ("%d per publisher" % max_per_source if max_per_source
+               else ("%d per publisher (config cap)" % CFG.MAX_PER_SOURCE
+                     if CFG.LIMIT_PER_SOURCE else "no per-publisher cap"))
+        print("date window: %s | sources: %d | %s"
+              % (window.describe(), len(sources), cap))
+        if keywords:
+            print("keywords (%s): %s" % (keyword_mode, ", ".join(keywords)))
     for src in sources:
         if verbose:
             print("\n=== {} ===".format(src["name"]))
         articles.extend(crawl_source(
             session, src, max_articles=max_per_source,
-            relevance_filter=relevance_filter, verbose=verbose))
+            relevance_filter=relevance_filter, verbose=verbose,
+            keywords=keywords, keyword_mode=keyword_mode,
+            window=window, keep_undated=keep_undated, stats=stats,
+            seen_keys=seen_keys))
 
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(articles, f, indent=2, ensure_ascii=False)
     if verbose:
         print("\nWrote {} articles -> {}".format(len(articles), out_file))
+        if stats.get("off_topic"):
+            print("  %d dropped as off-topic%s"
+                  % (stats["off_topic"],
+                     " (keywords: %s)" % ", ".join(keywords) if keywords else ""))
+        if stats.get("too_old"):
+            print("  %d dropped as outside %s" % (stats["too_old"], window.describe()))
+        if stats.get("duplicate"):
+            print("  %d duplicate story/stories skipped (same title from another "
+                  "listing or publisher)" % stats["duplicate"])
+        if stats.get("undated"):
+            keep = CFG.KEEP_UNDATED if keep_undated is None else keep_undated
+            print("  %d article(s) carry NO date on the page — %s"
+                  % (stats["undated"], "kept" if keep else "dropped"))
     return articles
 
 

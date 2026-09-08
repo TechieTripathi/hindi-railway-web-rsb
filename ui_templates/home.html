@@ -1,0 +1,88 @@
+{% extends "_base.html" %}
+{% block title %}Choose a pipeline{% endblock %}
+
+{% block headerextra %}
+<span class="chip {{ 'chip-ok' if key.length else 'chip-err' }}"
+      title="{{ 'Anthropic key read from ' ~ key.source if key.length else 'Step 2 (Write stories with AI) cannot run until a key is set' }}">
+  {{ 'AI key ready' if key.length else 'No AI key — step 2 will not run' }}
+  {% if key.length %}<span class="faint">{{ key.source }}</span>{% endif %}
+</span>
+{% endblock %}
+
+{% block body %}
+{# One card per pipeline. The card answers "where is this one up to?" without
+   opening it; the Open button leads to that pipeline's own full-width window.
+   Cards are driven by the PIPELINES registry, so a third pipeline appears here
+   by adding an entry — nothing on this page knows how many there are. #}
+<div style="max-width:880px">
+  <h2 style="margin:0 0 4px; font-size:17px">Where should the news come from?</h2>
+  <p class="dim small" style="margin:0 0 18px">
+    Each source has its own three-step window: fetch articles, write stories with
+    AI, check quality. Pick one to open it. Only the AI step costs money, and
+    nothing runs until you click.
+  </p>
+
+  <div style="display:grid; gap:14px">
+  {% for c in cards %}
+    <a href="/panel/{{ c.name }}" class="panel pipecard"
+       style="display:grid; grid-template-columns:auto 1fr auto; gap:18px; align-items:center;
+              padding:18px 20px; text-decoration:none; color:inherit">
+      <div style="font-size:30px; line-height:1; width:42px; text-align:center">{{ c.icon }}</div>
+
+      <div style="min-width:0">
+        <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap">
+          <span class="faint tiny" style="font-variant-numeric:tabular-nums">{{ c.number }}</span>
+          <strong style="font-size:15px">{{ c.title }}</strong>
+          {% if c.running %}
+            <span class="chip chip-next"><span class="spin"></span> running</span>
+          {% endif %}
+        </div>
+        <div class="dim small" style="margin-top:2px">{{ c.friendly }}</div>
+
+        {# The three counts mirror the three steps, in order. #}
+        <div class="small" style="margin-top:9px; display:flex; gap:16px; flex-wrap:wrap">
+          <span title="Sources this pipeline can read from">
+            <strong>{{ c.units }}</strong> <span class="dim">{{ c.unit_word }}</span></span>
+          <span title="Step 1 — articles fetched" class="{{ '' if c.fetched else 'faint' }}">
+            <strong>{{ c.fetched }}</strong> <span class="dim">fetched</span></span>
+          <span title="Step 2 — stories written by the AI" class="{{ '' if c.written else 'faint' }}">
+            <strong>{{ c.written }}</strong> <span class="dim">written</span></span>
+          <span title="Step 3 — stories quality-checked" class="{{ '' if c.checked else 'faint' }}">
+            <strong>{{ c.checked }}</strong> <span class="dim">checked</span></span>
+          {% if c.last %}
+            <span class="faint" title="Most recent change to this pipeline's files">last activity {{ c.last }}</span>
+          {% else %}
+            <span class="faint">nothing run yet</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="text-align:right; white-space:nowrap">
+        <span class="btn btn-sm {{ 'btn-primary' if not c.fetched }}">Open →</span>
+        {% if c.next_label and not c.running %}
+          <div class="faint tiny" style="margin-top:6px">next: {{ c.next_label }}</div>
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+  </div>
+
+  {% if recent %}
+  <details class="panel" style="padding:11px 15px; margin-top:18px">
+    <summary>Recent runs · {{ recent|length }}</summary>
+    <table style="border-collapse:collapse; width:100%; font-size:13px; margin-top:8px">
+      {% for r in recent %}
+      <tr style="border-top:1px solid var(--line)">
+        <td style="padding:7px 8px; white-space:nowrap" class="dim">{{ r.started }}</td>
+        <td style="padding:7px 8px; white-space:nowrap">{{ r.step_label }}</td>
+        <td style="padding:7px 8px" class="{{ 'ok' if r.state == 'ok' else ('err' if r.state == 'error' else 'dim') }}">
+          {{ r.summary or r.error or r.state }}</td>
+        <td style="padding:7px 8px; white-space:nowrap">
+          <a href="/logs?f={{ r.log_name }}" class="tiny">log →</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% endif %}
+</div>
+{% endblock %}

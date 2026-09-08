@@ -12,14 +12,28 @@
     --radius:10px;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  /* Dark palette, applied in two situations. The token list is repeated rather
+     than shared because a media query and a plain attribute selector cannot be
+     combined into one rule — keep the two blocks in sync.
+
+     1. The OS asks for dark AND the reader has not explicitly chosen light.
+        The `:not([data-theme="light"])` guard is what lets the toggle win. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg:#14171c; --panel:#1c2027; --panel2:#22272f; --line:#2e343d;
       --ink:#e7ebf0; --dim:#98a5b4; --faint:#77848f;
       --accent:#75a8ff; --accent-soft:#1d2837; --accent-line:#33455f;
       --ok:#5ed6a4; --ok-soft:#16291f; --warn:#f0b45a; --warn-soft:#2b2317;
       --err:#ff8a80; --err-soft:#2c1c1c;
     }
+  }
+  /* 2. The reader chose dark outright, whatever the OS says. */
+  :root[data-theme="dark"] {
+    --bg:#14171c; --panel:#1c2027; --panel2:#22272f; --line:#2e343d;
+    --ink:#e7ebf0; --dim:#98a5b4; --faint:#77848f;
+    --accent:#75a8ff; --accent-soft:#1d2837; --accent-line:#33455f;
+    --ok:#5ed6a4; --ok-soft:#16291f; --warn:#f0b45a; --warn-soft:#2b2317;
+    --err:#ff8a80; --err-soft:#2c1c1c;
   }
   * { box-sizing:border-box; }
   body {
@@ -92,6 +106,9 @@
   input:focus { outline:2px solid var(--accent-line); outline-offset:0; border-color:var(--accent); }
 
   pre { margin:0; white-space:pre-wrap; word-break:break-word; }
+  /* Article text: keep <pre>'s whitespace handling, drop its monospace font —
+     a verifier reads paragraphs of Hindi and English, not code. */
+  pre.prose { font-family:inherit; }
   details > summary { cursor:pointer; color:var(--dim); font-size:13px; }
   details > summary:hover { color:var(--accent); }
 
@@ -102,22 +119,235 @@
   }
   @keyframes spin { to { transform:rotate(360deg); } }
 
+  /* ── Two-pane verification layout ────────────────────────────────────────
+     Source on the left, AI output on the right, each pane scrolling on its
+     OWN so a 6000-char body can be read against a short story without either
+     side dragging the whole page. One scrollbar per pane — not one per field.
+
+     The panes are grid items, so `stretch` already equalises their height:
+     short articles give two short panes, long ones give two panes capped at
+     78vh. That is what keeps the two headers, and the two scrollbars, level.
+     `min-height:0` on the scroll region is required — without it a flex child
+     refuses to shrink below its content and the pane grows instead of
+     scrolling. */
+  .twopane { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .pane { display:flex; flex-direction:column; max-height:78vh; overflow:hidden; }
+  .pane > .panel-head { flex:0 0 auto; }
+  /* Scroll chaining is deliberately LEFT ON (no `overscroll-behavior:contain`).
+     A pane that has hit its bottom must hand the wheel to the page, so a reader
+     can keep scrolling straight through to the sources section below instead of
+     the page appearing to jam. `min-height:0` + `overflow-y:auto` are what give
+     each pane its own scrollbar; neither affects chaining. */
+  .pane-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; }
+  /* Which AI field you are reading stays visible while its text scrolls past. */
+  .pane-scroll .fieldhead {
+    position:sticky; top:0; z-index:1; background:var(--panel);
+    display:flex; gap:9px; align-items:baseline;
+    padding:9px 16px 5px; border-bottom:1px solid var(--line);
+  }
+  /* Below this width two panes are narrower than a line of Hindi text, so they
+     stack and the page scrolls again. The only breakpoint in the app — a
+     side-by-side layout is the one thing here that genuinely cannot reflow. */
+  @media (max-width:900px) {
+    .twopane { grid-template-columns:1fr; }
+    .pane { max-height:none; }
+  }
+
+  /* ── Colour-coded output sections ─────────────────────────────────────────
+     A non-technical reviewer should be able to tell a news story from a tweet
+     without reading the label. Each block carries a `tone-*` class that sets
+     one `--tone` custom property; the left edge and the heading both take their
+     colour from it, so adding a section type means adding one class, not
+     editing three rules.
+
+     The social colours are the networks' own, and are deliberately the same
+     values the product webapp uses for its `.social-*` cards, so the two UIs
+     do not teach conflicting colour meanings. They are fixed brand colours, so
+     they are stated once rather than per theme — each is paired with the
+     theme's own panel background, not a tinted one, to stay legible in both. */
+  .tone-story { --tone:var(--accent); }
+  .tone-tw    { --tone:#1da1f2; }
+  .tone-fb    { --tone:#1877f2; }
+  .tone-gen   { --tone:#6c757d; }
+  .tone-extra { --tone:var(--faint); }
+
+  .outblock { border-left:3px solid var(--tone); border-bottom:1px solid var(--line); }
+  .outblock > .fieldhead > strong { color:var(--tone); }
+  /* The swatch repeats the colour as a shape, so the grouping survives both
+     colour-blindness and a greyscale print. */
+  .outblock > .fieldhead .swatch {
+    display:inline-block; width:8px; height:8px; border-radius:2px;
+    background:var(--tone); margin-right:2px; flex:0 0 auto;
+  }
+
+  /* ── Run-the-pipeline form fields ─────────────────────────────────────────
+     Every control here used to be an inline `.small .dim` label sitting beside
+     its input at the same weight and colour, so nothing read as a label and the
+     three selects each repeated the same eight inline properties. Label above
+     control, label in the ink colour at a smaller weight-forward size, and one
+     `.control` class for every input. A hint line under each field carries the
+     plain-language explanation that previously only existed in a `title`
+     tooltip — invisible to anyone who does not think to hover. */
+  .fieldrow { display:flex; gap:22px 26px; flex-wrap:wrap; align-items:flex-start; }
+  .field { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .field-label {
+    font-size:12.5px; font-weight:620; color:var(--ink); letter-spacing:.005em;
+    display:flex; align-items:baseline; gap:6px;
+  }
+  .field-label .opt { font-weight:400; color:var(--faint); font-size:11.5px; }
+  .field-hint { font-size:11.5px; line-height:1.45; color:var(--faint); max-width:260px; }
+  .control {
+    font:inherit; font-size:14px; padding:6px 9px; border-radius:7px;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+  }
+  .control:disabled { opacity:.5; cursor:not-allowed; }
+  .control:focus { outline:2px solid var(--accent-line); outline-offset:0; border-color:var(--accent); }
+  /* The cap field swaps between a long note ("No cap — takes everything in the
+     date window.") and a short one ("Capped at this many."). Its width followed
+     the text, so ticking the box shrank the field, it suddenly fitted on the
+     previous line, and the whole control jumped rows. A fixed width — the same
+     260px the hints already cap at — makes the footprint independent of state,
+     so nothing moves when you tick it. */
+  .field-cap { width:260px; }
+
+  /* A checkbox reads as a sentence, so it keeps its label inline. */
+  .field-check { flex-direction:row; align-items:center; gap:8px; cursor:pointer; }
+  .field-check .field-label { font-weight:500; }
+
+  /* ── Landing cards + pipeline switcher ────────────────────────────────────
+     The whole card is the link, so the hover has to say so. The switcher strip
+     is the same chip row on every pipeline-scoped page, built from the registry,
+     so no page hardcodes which "other" pipeline exists. */
+  .pipecard { transition:border-color .12s, box-shadow .12s; }
+  .pipecard:hover { border-color:var(--accent-line); box-shadow:0 2px 10px rgba(37,99,235,.10); }
+  .pipecard:hover .btn { border-color:var(--accent); color:var(--accent); }
+  .pipecard:hover .btn-primary { color:#fff; }
+  .switcher { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .switcher .chip { text-decoration:none; }
+  .switcher .chip:hover { color:var(--accent); border-color:var(--accent-line); }
+  .switcher .chip[aria-current] { background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line); }
+
+  /* ── Stage pills (Browse articles) ────────────────────────────────────────
+     `.pill` was referenced by data.html but never defined, so the stage links
+     set a `border-color` with no border-width and rendered as bare text — the
+     three stages were visually indistinguishable. They are a PIPELINE, so they
+     are numbered and colour-coded: crawled (grey, no AI involved), AI written
+     (blue, the accent used everywhere else for model output), quality checked
+     (green, the ok colour). The selected one is filled, not merely tinted, so
+     "which am I looking at" survives a glance. */
+  .stagepill {
+    display:inline-flex; align-items:center; gap:7px; text-decoration:none;
+    padding:6px 13px 6px 8px; border-radius:999px; font-size:13px; font-weight:550;
+    border:1px solid var(--line); background:var(--panel); color:var(--dim);
+  }
+  .stagepill:hover { border-color:var(--tone); color:var(--tone); }
+  .stagepill .step {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:19px; height:19px; border-radius:50%; font-size:11.5px; font-weight:700;
+    background:var(--tone); color:var(--panel); flex:0 0 auto;
+  }
+  .stagepill .n { color:var(--faint); font-weight:500; font-variant-numeric:tabular-nums; }
+  .stagepill[aria-current] {
+    background:var(--tone); border-color:var(--tone); color:#fff;
+  }
+  .stagepill[aria-current] .step { background:rgba(255,255,255,.25); color:#fff; }
+  .stagepill[aria-current] .n { color:rgba(255,255,255,.8); }
+  .stagepill.empty { opacity:.5; }
+  /* The arrow between pills, so the three read as a sequence not a menu. */
+  .stagearrow { color:var(--faint); font-size:13px; }
+  .tone-crawl { --tone:#6c757d; }
+  .tone-ok    { --tone:var(--ok); }
+
+  /* ── Language tabs ────────────────────────────────────────────────────────
+     Hindi and English are the SAME story, so they belong behind a toggle
+     rather than stacked — stacking invites reading the translation as extra
+     content. Plain buttons over a radio-less tablist: no library, and it
+     degrades to showing the first language if JS never runs. */
+  .langtabs {
+    display:flex; gap:5px; align-items:center; flex-wrap:wrap;
+    padding:10px 16px 0;
+  }
+  .langtab {
+    font:inherit; font-size:13px; font-weight:550; cursor:pointer;
+    padding:4px 12px; border-radius:999px; white-space:nowrap;
+    background:var(--panel2); color:var(--dim); border:1px solid var(--line);
+  }
+  .langtab:hover { color:var(--accent); border-color:var(--accent-line); }
+  .langtab[aria-selected="true"] {
+    background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line);
+  }
+
+  /* Theme toggle. Three states so the default stays "follow the OS" — adding a
+     switch should not take that away from anyone who never touches it. */
+  .themetoggle {
+    display:inline-flex; align-items:center; gap:6px; padding:5px 11px;
+    font-size:13px; font-weight:550; line-height:1.4;
+  }
+  .themetoggle .tt-icon { font-size:14px; }
+  /* Only the label for the ACTIVE state is shown; the other two are collapsed. */
+  .themetoggle [data-when] { display:none; }
+  :root:not([data-theme]) .themetoggle [data-when="system"],
+  :root[data-theme="light"] .themetoggle [data-when="light"],
+  :root[data-theme="dark"]  .themetoggle [data-when="dark"] { display:inline; }
+
   .bar { height:6px; background:var(--panel2); border-radius:999px; overflow:hidden; }
   .bar > i { display:block; height:100%; background:var(--accent); width:0;
              transition:width .35s ease; border-radius:999px; }
   .bar.indet > i { width:34%; animation:slide 1.5s ease-in-out infinite; }
   @keyframes slide { 0%{margin-left:-34%} 100%{margin-left:100%} }
 </style>
+<script>
+  // Applied before the first paint deliberately: read the stored choice and
+  // stamp it on <html> now, or the page renders in the OS theme for one frame
+  // and then snaps to the chosen one. Absent/invalid value = follow the OS,
+  // which is what every reader who never touches the toggle keeps getting.
+  try {
+    var t = localStorage.getItem('theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) { /* private mode / blocked storage: fall through to the OS theme */ }
+</script>
 <header>
   <div class="hrow">
     <h1 class="brand">🚆 Railway research</h1>
     <nav>
+      {% set navp = pipeline if pipeline is defined and pipeline else all_pipelines[0].name %}
       <a href="/" {% if nav == 'panel' %}aria-current="page"{% endif %}>Run the pipeline</a>
-      <a href="/data/web" {% if nav == 'data' %}aria-current="page"{% endif %}>Browse articles</a>
+      <a href="/data/{{ navp }}" {% if nav == 'data' %}aria-current="page"{% endif %}>Browse articles</a>
       <a href="/logs" {% if nav == 'logs' %}aria-current="page"{% endif %}>Run history</a>
+      <a href="/clusters/{{ navp }}" {% if nav == 'clusters' %}aria-current="page"{% endif %}>Report grouping</a>
+      <a href="/scores" {% if nav == 'scores' %}aria-current="page"{% endif %}>How scores work</a>
     </nav>
     <span class="spacer"></span>
+    <button type="button" class="btn themetoggle" id="themetoggle"
+            title="Switch between the light and dark palette. Starts on whatever your system asks for.">
+      <span class="tt-icon" data-when="system">◑</span>
+      <span class="tt-icon" data-when="light">☀</span>
+      <span class="tt-icon" data-when="dark">☾</span>
+      <span data-when="system">auto</span>
+      <span data-when="light">light</span>
+      <span data-when="dark">dark</span>
+    </button>
     {% block headerextra %}{% endblock %}
   </div>
 </header>
 <main>{% block body %}{% endblock %}</main>
+<script>
+  // auto -> light -> dark -> auto. "auto" is the absence of the attribute, so
+  // the media query takes over again rather than being frozen at a snapshot of
+  // whatever the OS happened to want when the reader last clicked.
+  (function () {
+    var order = ['system', 'light', 'dark'];
+    var btn = document.getElementById('themetoggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var now = document.documentElement.dataset.theme || 'system';
+      var next = order[(order.indexOf(now) + 1) % order.length];
+      if (next === 'system') delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = next;
+      try {
+        if (next === 'system') localStorage.removeItem('theme');
+        else localStorage.setItem('theme', next);
+      } catch (e) { /* not persisted, but the page still switches */ }
+    });
+  })();
+</script>

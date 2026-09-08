@@ -1,0 +1,290 @@
+{% extends "_base.html" %}
+{% block title %}Verify #{{ index }}{% endblock %}
+
+{% block headerextra %}
+<span class="faint tiny mono">{{ file }}</span>
+{% endblock %}
+
+{% block body %}
+
+<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px">
+  <a href="/data/{{ pipeline }}?stage={{ stage }}" style="color:var(--accent)">← all articles</a>
+  <span class="dim small">{{ title }}</span>
+  {% for s in stages %}
+    {% if s.count %}
+      <a href="/verify/{{ pipeline }}/{{ index }}?stage={{ s.key }}" class="chip"
+         style="text-decoration:none;
+                color:{{ 'var(--accent)' if s.key == stage else 'var(--dim)' }};
+                border-color:{{ 'var(--accent-line)' if s.key == stage else 'var(--line)' }}">
+        {{ s.label }}</a>
+    {% endif %}
+  {% endfor %}
+  <span class="spacer"></span>
+  {% if index > 0 %}<a href="/verify/{{ pipeline }}/{{ index - 1 }}?stage={{ stage }}"
+     style="color:var(--accent)">← previous</a>{% else %}<span class="faint">← previous</span>{% endif %}
+  <span class="dim small">{{ index + 1 }} of {{ count }}</span>
+  {% if index + 1 < count %}<a href="/verify/{{ pipeline }}/{{ index + 1 }}?stage={{ stage }}"
+     style="color:var(--accent)">next →</a>{% else %}<span class="faint">next →</span>{% endif %}
+</div>
+
+<!-- ── scores ─────────────────────────────────────────────────────────────── -->
+<section class="panel" style="margin-bottom:16px">
+  <div class="panel-head">
+    <strong>Scores</strong>
+    <span class="dim small">hover any figure for what it means · full definitions in
+      <a href="/scores">how the scores are calculated</a></span>
+  </div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+              gap:1px; background:var(--line)">
+    {% for sc in scores %}
+    <div style="background:var(--panel); padding:12px 14px" title="{{ sc.hint }}">
+      <div class="dim tiny">{{ sc.label }}</div>
+      <div style="font-size:23px; font-weight:600; line-height:1.25"
+           class="{{ sc.band if sc.band != 'none' else 'faint' }}">
+        {{ sc.value if sc.value is not none else '—' }}{% if sc.value is not none %}<span
+           class="faint" style="font-size:13px; font-weight:400">
+           {{ '(lower is better)' if sc.key == 'plagiarism_score' else '' }}</span>{% endif %}
+      </div>
+      <div class="faint tiny">{{ sc.computed }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if gate_failures %}
+  <div style="padding:11px 14px; border-top:1px solid var(--line)" class="warn small">
+    <strong>⚠ {{ gate_failures|length }} gate failure(s)</strong> — these cap the trust
+    ceiling regardless of the model's own score:
+    <ul style="margin:6px 0 0; padding-left:20px">
+      {% for g in gate_failures %}<li>{{ g }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if topics_verified or topics_unsupported %}
+  <div style="padding:11px 14px; border-top:1px solid var(--line)" class="small">
+    <span class="dim">Topics:</span>
+    {% for t in topics_verified %}<span class="chip chip-ok">{{ t }} ✓</span> {% endfor %}
+    {% for t in topics_unsupported %}<span class="chip chip-warn"
+       title="The model assigned this topic but no supporting term appears in the source">{{ t }} · no source evidence</span> {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<!-- ── side by side ───────────────────────────────────────────────────────── -->
+<div class="twopane">
+
+  <!-- LEFT: the original source -->
+  <section class="panel pane">
+    <div class="panel-head" style="background:var(--panel2)">
+      <strong>① Original source</strong>
+      {% if source_parts|length > 1 %}
+        <span class="chip" title="This report was merged from several articles. Each is headed separately below.">{{ source_parts|length }} sources</span>
+      {% endif %}
+      <span class="dim small">what was actually published</span>
+    </div>
+    <div class="pane-scroll">
+    <div style="padding:14px 16px; border-bottom:1px solid var(--line)">
+      <div style="font-size:12.5px; display:grid; grid-template-columns:92px 1fr;
+                  gap:4px 12px; overflow-wrap:anywhere">
+        <span class="dim">source</span><span>{{ art.source or '—' }}</span>
+        <span class="dim">date</span><span>{{ art.date or '— none published' }}</span>
+        <span class="dim">article</span>
+        <span><a href="{{ art.link }}" target="_blank" rel="noreferrer">{{ art.link }}</a></span>
+        {% if listing %}
+        <span class="dim">found on</span>
+        <span><a href="{{ listing }}" target="_blank" rel="noreferrer"
+           style="color:{{ 'var(--accent)' if listing_exact else 'var(--warn)' }}">{{ listing }}</a>
+          {%- if not listing_exact %} <span class="warn tiny">(guessed)</span>{% endif %}</span>
+        {% endif %}
+        {% if art.extractor %}
+        <span class="dim">extracted by</span>
+        <span class="{{ 'warn' if art.extractor == 'generic' }}">{{ art.extractor }}
+          {%- if art.extractor == 'generic' %} — this site's selector has drifted{% endif %}</span>
+        {% endif %}
+        {# art is a plain dict: `art.missing_key is not none` is TRUE in Jinja,
+           because Undefined is not None. Use .get() so absent fields skip. #}
+        {% if art.get('body_hindi_ratio') is not none %}
+        <span class="dim">Devanagari</span>
+        <span class="{{ '' if art.get('is_hindi_body') else 'warn' }}">{{ '%.0f%%'|format(art.get('body_hindi_ratio') * 100) }} of the body</span>
+        {% endif %}
+      </div>
+    </div>
+    {# `art.title`, `art.source` and `art.date` above are the LEAD article's only.
+       For a merged report the per-source headers below are the honest attribution,
+       so the lead title stays as the report title and each source is labelled. #}
+    <h3 style="margin:0; padding:13px 16px 0; font-size:15px; line-height:1.45">{{ art.title }}</h3>
+    <div class="faint tiny" style="padding:5px 16px 10px">
+      {{ (art.body or '')|length }} characters{% if source_parts|length > 1 %}
+      across {{ source_parts|length }} sources{% endif %}</div>
+    {% for part in source_parts %}
+      {% if part.source %}
+        <div class="fieldhead">
+          <strong class="small">{{ part.source }}</strong>
+          <span class="faint tiny">{{ part.date }}</span>
+          <span class="faint tiny">{{ part.text|length }} chars</span>
+          {% set href = cluster_links[loop.index0] if loop.index0 < cluster_links|length %}
+          {% if href %}
+            <a href="{{ href }}" target="_blank" rel="noreferrer" class="tiny"
+               title="{{ href }}">open original ↗</a>
+          {% endif %}
+        </div>
+      {% endif %}
+      <pre class="prose" style="padding:12px 16px 16px; margin:0; font-size:14px;
+                  line-height:1.75; white-space:pre-wrap">{{ part.text }}</pre>
+    {% endfor %}
+    </div>
+  </section>
+
+  <!-- RIGHT: the AI output -->
+  <section class="panel pane">
+    <div class="panel-head" style="background:var(--accent-soft)">
+      <strong style="color:var(--accent)">② AI generated</strong>
+      <span class="dim small">not verified — this is what you are checking</span>
+    </div>
+    {% if not has_ai %}
+      <p class="dim" style="padding:16px; margin:0">
+        No story generated for this article yet.
+        {% if stage == 'crawl' %}You are viewing the <strong>crawled</strong> stage —
+          switch to <em>AI generated</em> above, or run step 2 on the
+          <a href="/">control panel</a>.
+        {% else %}Run step 2 on the <a href="/">control panel</a>.{% endif %}
+      </p>
+    {% endif %}
+    <div class="pane-scroll">
+
+    {# ── The story, one language at a time ─────────────────────────────────
+       Hindi and English are the same story, so they are a toggle rather than
+       two stacked blocks. With JS off the first panel is already visible, so
+       the Hindi story still reads. #}
+    {% if story_tabs %}
+      <div class="outblock tone-story">
+        <div class="fieldhead">
+          <span class="swatch"></span>
+          <strong class="small">Story</strong>
+          <span class="faint tiny">written by the AI from the source on the left</span>
+        </div>
+        {% if story_tabs|length > 1 %}
+        <div class="langtabs" role="tablist" aria-label="Story language">
+          {% for t in story_tabs %}
+            <button type="button" class="langtab" role="tab"
+                    data-langtab="{{ t.key }}" title="{{ t.note }}"
+                    aria-selected="{{ 'true' if loop.first else 'false' }}"
+                    aria-controls="lang-{{ t.key }}">{{ t.label }}</button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% for t in story_tabs %}
+        <div class="langpanel" id="lang-{{ t.key }}" data-langpanel="{{ t.key }}"
+             {% if not loop.first %}hidden{% endif %}>
+          <div class="faint tiny" style="padding:8px 16px 0">
+            {{ t.label }} · {{ t.note }} · {{ t.chars }} chars</div>
+          {% if t.headline %}
+            <div style="padding:7px 16px 0; font-size:15px; font-weight:600;
+                        line-height:1.45">{{ t.headline }}</div>
+          {% endif %}
+          <pre class="prose" style="padding:9px 16px 14px; margin:0; font-size:14px;
+                      line-height:1.75; white-space:pre-wrap">{{ t.body }}</pre>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ── Social posts, each in its own network's colour ────────────────────── #}
+    {% for sc in socials %}
+      <div class="outblock tone-{{ sc.tone }}">
+        <div class="fieldhead">
+          <span class="swatch"></span>
+          <strong class="small">{{ sc.label }}</strong>
+          <span class="faint tiny">{{ sc.text|length }} chars</span>
+        </div>
+        <pre class="prose" style="padding:9px 16px 13px; margin:0; font-size:14px;
+                    line-height:1.75; white-space:pre-wrap">{{ sc.text }}</pre>
+      </div>
+    {% endfor %}
+
+    {% for label, text, tone in extras %}
+      <div class="outblock tone-{{ tone }}">
+        <div class="fieldhead">
+          <span class="swatch"></span>
+          <strong class="small">{{ label }}</strong>
+        </div>
+        <pre class="prose" style="padding:9px 16px 13px; margin:0; font-size:14px;
+                    line-height:1.75; white-space:pre-wrap">{{ text }}</pre>
+      </div>
+    {% endfor %}
+
+    {% if art.impact_level %}
+    <div style="padding:11px 16px" class="small">
+      <span class="dim">Impact:</span> <strong>{{ art.impact_level }}</strong>
+      {% if art.impact_rule_level %}
+        <span class="dim">· rule from source says</span>
+        <strong class="{{ 'ok' if art.impact_agrees else 'warn' }}">{{ art.impact_rule_level }}</strong>
+        {% if not art.impact_agrees %}<span class="warn">· disagrees</span>{% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- ── other sources for the same story ───────────────────────────────────── -->
+<section class="panel" style="margin-top:16px">
+  <div class="panel-head">
+    <strong>Sources this report was written from</strong>
+    <span class="dim small">{{ 'merged cluster' if cluster else 'same-story matches within this crawl' }}</span>
+  </div>
+  {% if cluster %}
+    <p class="small" style="padding:12px 16px 0; margin:0">
+      This report was generated from <strong>{{ cluster|length }} source articles</strong>
+      merged into one. Compare the AI output against all of them:
+    </p>
+    <table style="border-collapse:collapse; width:100%; font-size:13px">
+      {% for m in cluster %}
+      <tr style="border-top:1px solid var(--line)">
+        <td style="padding:9px 16px; white-space:nowrap"><strong>{{ m.source }}</strong></td>
+        <td style="padding:9px 10px">{{ m.title or '' }}</td>
+        <td style="padding:9px 16px; white-space:nowrap">
+          {% if m.link %}<a href="{{ m.link }}" target="_blank" rel="noreferrer">open original →</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% elif same_story %}
+    <table style="border-collapse:collapse; width:100%; font-size:13px">
+      {% for r in same_story %}
+      <tr style="border-top:1px solid var(--line)">
+        <td style="padding:9px 16px; white-space:nowrap"><strong>{{ r.source }}</strong></td>
+        <td style="padding:9px 10px">{{ r.title }}</td>
+        <td style="padding:9px 10px; white-space:nowrap" class="dim">{{ r.chars }} chars</td>
+        <td style="padding:9px 10px; white-space:nowrap" class="dim"
+            title="Title-word overlap (Jaccard)">{{ r.score }} overlap</td>
+        <td style="padding:9px 16px; white-space:nowrap">
+          <a href="/verify/{{ pipeline }}/{{ r.i }}?stage={{ stage }}">compare →</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="dim small" style="padding:14px 16px; margin:0">
+      No other article in this crawl covers the same story, so there is
+      <strong>one source</strong> to check against.
+      <br><span class="faint">This is expected: the pipeline crawls each publisher's own
+      topic page rather than searching, so it finds a story once. Measured on the current
+      corpus, cross-publisher title overlap peaks at 0.10 — well below the 0.45 needed to
+      call it the same story. The generated text is written from this single body.</span>
+    </p>
+  {% endif %}
+</section>
+<script>
+  // Language toggle for the story block. Uses `hidden` rather than a style
+  // change so a hidden panel is also hidden from assistive tech.
+  document.querySelectorAll('[role="tablist"][aria-label="Story language"]').forEach(strip => {
+    const scope = strip.closest('.outblock');
+    strip.querySelectorAll('.langtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const want = btn.dataset.langtab;
+        strip.querySelectorAll('.langtab').forEach(b =>
+          b.setAttribute('aria-selected', String(b === btn)));
+        scope.querySelectorAll('[data-langpanel]').forEach(pn =>
+          pn.hidden = pn.dataset.langpanel !== want);
+      });
+    });
+  });
+</script>
+{% endblock %}

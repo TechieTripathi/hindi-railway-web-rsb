@@ -30,7 +30,7 @@
         {% endfor %}
       </div>
       <p class="dim small" style="margin:13px 0 0">
-        Pick a pipeline below and click the steps in order. <strong>Nothing runs until you
+        Click the steps in order. <strong>Nothing runs until you
         click</strong>, and only step&nbsp;2 costs money. Everything is written under
         <code class="tiny">research/output/</code> — your app's own files are never touched.
       </p>
@@ -41,7 +41,16 @@
   </div>
 </section>
 
-<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(470px,1fr)); gap:20px">
+<div class="switcher" style="margin-bottom:14px">
+  <a href="/" class="small" style="margin-right:6px">← all pipelines</a>
+  {% for ap in all_pipelines %}
+    <a href="/panel/{{ ap.name }}" class="chip"
+       {% if ap.name == pipeline %}aria-current="page"{% endif %}>{{ ap.icon }} {{ ap.title }}</a>
+  {% endfor %}
+</div>
+
+{# One pipeline per window now, so the grid holds a single full-width panel. #}
+<div style="display:grid; gap:20px">
 {% for p in pipelines %}
   <section class="panel" data-pipeline="{{ p.name }}">
     <div style="padding:16px 18px; border-bottom:1px solid var(--line)">
@@ -53,19 +62,128 @@
       </details>
     </div>
 
-    <div style="padding:12px 18px; border-bottom:1px solid var(--line);
-                display:flex; gap:18px; flex-wrap:wrap; align-items:center">
-      {% for prm in p.params %}
-      <label class="small dim" style="display:flex; gap:7px; align-items:center">
-        {% if prm.type == 'checkbox' %}
-          <input type="checkbox" data-param="{{ prm.key }}" {{ 'checked' if prm.default }}>
-          {{ prm.label }}
-        {% else %}
-          {{ prm.label }}
-          <input type="number" min="1" max="50" data-param="{{ prm.key }}" value="{{ prm.default }}">
-        {% endif %}
-      </label>
-      {% endfor %}
+    <div style="padding:12px 18px; border-bottom:1px solid var(--line)">
+      <div class="fieldrow">
+        <div class="field">
+          <label class="field-label" for="days-{{ p.name }}">Published within</label>
+          <select id="days-{{ p.name }}" class="control" data-param="days">
+            {% for c in p.day_choices %}
+              <option value="{{ c.value }}" {{ 'selected' if c.value == '' }}>{{ c.label }}</option>
+            {% endfor %}
+          </select>
+          <span class="field-hint">How old an article may be and still be collected.</span>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="group-{{ p.name }}">Group into reports</label>
+          <select id="group-{{ p.name }}" class="control" data-param="cluster_mode">
+            {% for m in p.cluster_modes %}
+              <option value="{{ m.value }}" title="{{ m.hint }}"
+                {{ 'selected' if m.value == 'story' }}>{{ m.label }}</option>
+            {% endfor %}
+          </select>
+          {# The counts live here, not in the <option>: inside a dropdown they
+             cannot be styled, and with no crawl yet they render as three
+             identical "0 report(s), 0 AI call(s)" rows that make the three
+             choices look the same. Here one sentence can explain the zero. #}
+          <span class="field-hint">
+            <span class="group-count"
+                  data-counts='{{ p.estimate.counts|tojson }}'
+                  data-calls='{{ p.estimate.calls|tojson }}'
+                  data-total="{{ p.estimate.total }}">
+              {%- if p.estimate.total -%}
+                <strong>{{ p.estimate.counts['story'] }}</strong> report(s) from
+                {{ p.estimate.total }} article(s) · ~{{ p.estimate.calls['story'] }} AI call(s)
+              {%- else -%}
+                No articles collected yet — run <strong>step 1</strong> below first.
+              {%- endif -%}
+            </span>
+            <span class="group-why"></span>
+          </span>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="kw-{{ p.name }}">
+            Only articles mentioning <span class="opt">optional</span></label>
+          <input id="kw-{{ p.name }}" type="text" class="control kw-input"
+                 data-param="keywords" value="" style="width:250px"
+                 placeholder="e.g. वंदे भारत, दुर्घटना, irctc">
+          <span class="field-hint">Comma-separated. Hindi word endings are handled,
+            so <code>रेलगाड़ी</code> also matches <code>रेलगाड़ियों</code>. Leave
+            empty to collect all railway news.</span>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="kwmode-{{ p.name }}">How to apply them</label>
+          <select id="kwmode-{{ p.name }}" class="control kw-mode" data-param="keyword_mode" disabled>
+            {% for m in p.keyword_modes %}
+              <option value="{{ m.value }}" title="{{ m.hint }}">{{ m.label }}</option>
+            {% endfor %}
+          </select>
+          <span class="field-hint">Enabled once you type a keyword above.</span>
+        </div>
+
+        {% for prm in p.params %}
+          {% if prm.type == 'cap' %}
+            {# The toggle IS the label, and the number sits directly under it in
+               the SAME field, so the two can never wrap onto different rows. The
+               cap-* classes are what the toggle script looks for. #}
+            <div class="field field-cap">
+              <label class="field-label" style="cursor:pointer">
+                <input type="checkbox" class="cap-toggle" data-param="{{ prm.toggle_key }}"
+                       {{ 'checked' if prm.toggle_default }} style="margin:0 2px 0 0">
+                {{ prm.label }}
+              </label>
+              <div style="display:flex; gap:8px; align-items:center">
+                <input type="number" min="1" max="200" class="control cap-number"
+                       data-param="{{ prm.number_key }}" value="{{ prm.number_default }}"
+                       style="width:86px" aria-label="{{ prm.label }} — how many"
+                       {{ '' if prm.toggle_default else 'disabled' }}>
+                <span class="dim small">{{ prm.unit }}</span>
+              </div>
+              <span class="field-hint cap-note">{{ 'Capped at this many.'
+                  if prm.toggle_default else 'No cap — takes everything in the date window.' }}</span>
+            </div>
+          {% elif prm.type == 'checkbox' %}
+            <label class="field field-check">
+              <input type="checkbox" data-param="{{ prm.key }}" {{ 'checked' if prm.default }}>
+              <span class="field-label">{{ prm.label }}</span>
+            </label>
+          {% else %}
+            <div class="field">
+              <label class="field-label" for="{{ prm.key }}-{{ p.name }}">{{ prm.label }}</label>
+              <input id="{{ prm.key }}-{{ p.name }}" type="number" min="1" max="200"
+                     class="control" data-param="{{ prm.key }}" value="{{ prm.default }}"
+                     style="width:86px">
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="small" style="margin-top:9px">
+        <a href="/clusters/{{ p.name }}">how many reports would this produce? →</a>
+      </div>
+
+      <details style="margin-top:10px">
+        <summary>{{ p.select_label }} — <span class="pick-count" data-for="{{ p.name }}">
+          {{ p.selectable | selectattr('checked') | list | length }} of {{ p.selectable|length }}</span></summary>
+        <div style="display:flex; gap:8px; margin:9px 0">
+          <button type="button" class="btn-sm pick-all">select all</button>
+          <button type="button" class="btn-sm pick-none">clear</button>
+          <button type="button" class="btn-sm pick-reset">config default</button>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:5px 14px">
+          {% for opt in p.selectable %}
+          <label class="small" style="display:flex; gap:7px; align-items:flex-start">
+            <input type="checkbox" class="pick" data-value="{{ opt.value }}"
+                   data-default="{{ 1 if opt.checked else 0 }}" {{ 'checked' if opt.checked }}>
+            <span>{{ opt.label }}
+              {% if opt.note %}<span class="faint tiny">· {{ opt.note }}</span>{% endif %}
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </details>
     </div>
 
     {% for s in p.steps %}
@@ -83,16 +201,44 @@
           {% if s.meta.costs_money %}
             <span class="chip chip-warn" title="This step calls the Claude API, which is billed.">costs money</span>
           {% endif %}
-          {% if s.is_next %}<span class="chip chip-next">do this next</span>{% endif %}
+          {% if s.running %}
+            <span class="chip chip-next"><span class="spin"></span> running now</span>
+          {% elif s.is_next %}<span class="chip chip-next">do this next</span>{% endif %}
         </div>
         <div class="dim small" style="margin-top:2px">{{ s.meta.what }}</div>
+        {# The only billed step, so it is the only one that states a number.
+           Read off the SAME clustering the run will do, and the same resume
+           rule, so the figure matches what actually happens. #}
+        {# Only worth warning about cost when the step can actually be clicked.
+           On a first load step 2 is Locked and disabled, and three orange chips
+           about money on an impossible action read as something being wrong. #}
+        {% if s.meta.costs_money and s.enabled and not s.why %}
+        <div class="small" style="margin-top:5px">
+          <span class="chip chip-warn" id="estchip-{{ p.name }}"
+                title="One Claude call per report. A response that fails to parse is retried once, so this is a floor, not a cap.">
+            {# One inner span: `.chip` is inline-flex with a gap, so a bare text
+               node beside the count would render as "~ 4" instead of "~4". #}
+            {%- if p.estimate.total -%}
+            <span>this run: ~<span class="est-calls"
+              data-estimate='{{ p.estimate.calls|tojson }}'>{{ p.estimate.calls['story'] }}</span> AI calls</span>
+            {%- else -%}
+            <span>nothing to write yet — run step 1 first</span>
+            {%- endif -%}</span>
+          {% if p.estimate.done %}
+            <span class="dim">· {{ p.estimate.done }} already written and will be skipped</span>
+          {% endif %}
+          <span class="faint">· change <em>reports</em> above to spend less</span>
+        </div>
+        {% endif %}
 
         <div class="small" style="margin-top:7px">
           {% if s.view %}
             <span class="ok">✓ {{ s.detail }}</span>
             · <a href="/data/{{ p.name }}?stage={{ {'crawl':'crawl','generate':'agency','score':'scored'}[s.key] }}">see the {{ s.view }} articles →</a>
+          {% elif s.running %}
+            <span class="dim">Running — progress is in <strong>What's happening</strong> below.</span>
           {% elif s.why %}
-            <span class="dim">Locked — {{ s.why }}.</span>
+            <span class="dim">{{ 'Waiting' if s.busy else 'Locked' }} — {{ s.why }}.</span>
           {% else %}
             <span class="dim">Not run yet. Gives you {{ s.meta.produces }}.</span>
           {% endif %}
@@ -111,7 +257,7 @@
               {{ 'disabled' if not s.enabled }}
               title="{{ s.why or s.meta.what }}"
               style="align-self:flex-start; min-width:118px">
-        {% if s.view %}Run again{% else %}{{ s.meta.label.split(' ')[0] }}{% endif %}
+        {% if s.view %}Run again{% else %}{{ s.meta.button }}{% endif %}
       </button>
     </div>
     {% endfor %}
@@ -198,15 +344,104 @@ function params(section) {
   section.querySelectorAll('[data-param]').forEach(el => {
     out[el.dataset.param] = el.type === 'checkbox' ? el.checked : el.value;
   });
+  // Selected publishers / zones. Sent only when it differs from "everything",
+  // so an untouched picker keeps the pipeline on its config default.
+  const picks = [...section.querySelectorAll('input.pick')];
+  const chosen = picks.filter(c => c.checked).map(c => c.dataset.value);
+  if (chosen.length && chosen.length !== picks.length) out.sources = chosen;
+  else if (!chosen.length) out.sources = [];
   return out;
 }
+
+// The mode select only means anything once there are keywords to apply, so it
+// stays disabled until the box has something in it.
+// The estimate must follow the "reports" dropdown, or the number on the button
+// describes a mode the user already changed away from.
+function refreshEstimate(section) {
+  const sel = section.querySelector('[data-param="cluster_mode"]');
+  if (!sel) return;
+
+  // the number on the step-2 button
+  const out = section.querySelector('.est-calls');
+  if (out) {
+    let calls;
+    try { calls = JSON.parse(out.dataset.estimate); } catch (e) { calls = null; }
+    if (calls && sel.value in calls) out.textContent = calls[sel.value];
+  }
+
+  // the count under the grouping field, and why this option costs what it does
+  const cnt = section.querySelector('.group-count');
+  if (cnt) {
+    let counts, calls2, total;
+    try {
+      counts = JSON.parse(cnt.dataset.counts);
+      calls2 = JSON.parse(cnt.dataset.calls);
+      total = parseInt(cnt.dataset.total, 10) || 0;
+    } catch (e) { return; }
+    // With nothing crawled the server already wrote the explanatory sentence;
+    // leave it alone rather than replacing it with zeros.
+    if (total && sel.value in counts) {
+      cnt.innerHTML = '<strong>' + counts[sel.value] + '</strong> report(s) from '
+        + total + ' article(s) · ~' + calls2[sel.value] + ' AI call(s)';
+    }
+  }
+  const why = section.querySelector('.group-why');
+  if (why) {
+    const opt = sel.options[sel.selectedIndex];
+    why.textContent = opt && opt.title ? ' ' + opt.title : '';
+  }
+}
+
+function refreshKeywordMode(section) {
+  const box = section.querySelector('.kw-input');
+  const mode = section.querySelector('.kw-mode');
+  if (!box || !mode) return;
+  mode.disabled = !box.value.trim();
+}
+
+function refreshCount(section) {
+  const picks = [...section.querySelectorAll('input.pick')];
+  const n = picks.filter(c => c.checked).length;
+  const el = section.querySelector('.pick-count');
+  if (el) el.textContent = n + ' of ' + picks.length;
+}
+
+document.querySelectorAll('section[data-pipeline]').forEach(section => {
+  const kw = section.querySelector('.kw-input');
+  if (kw) kw.addEventListener('input', () => refreshKeywordMode(section));
+  refreshKeywordMode(section);
+
+  const modeSel = section.querySelector('[data-param="cluster_mode"]');
+  if (modeSel) modeSel.addEventListener('change', () => refreshEstimate(section));
+  refreshEstimate(section);
+
+  const picks = [...section.querySelectorAll('input.pick')];
+  const set = fn => { picks.forEach(fn); refreshCount(section); };
+  section.querySelector('.pick-all')?.addEventListener('click',
+    () => set(c => c.checked = true));
+  section.querySelector('.pick-none')?.addEventListener('click',
+    () => set(c => c.checked = false));
+  section.querySelector('.pick-reset')?.addEventListener('click',
+    () => set(c => c.checked = c.dataset.default === '1'));
+  picks.forEach(c => c.addEventListener('change', () => refreshCount(section)));
+
+  const capToggle = section.querySelector('.cap-toggle');
+  const capNumber = section.querySelector('.cap-number');
+  const capNote = section.querySelector('.cap-note');
+  if (capToggle) capToggle.addEventListener('change', () => {
+    if (capNumber) capNumber.disabled = !capToggle.checked;
+    if (capNote) capNote.textContent = capToggle.checked
+      ? 'Capped at this many.'
+      : 'No cap — takes everything in the date window.';
+  });
+});
 
 document.querySelectorAll('section[data-pipeline]').forEach(section => {
   const pipeline = section.dataset.pipeline;
   section.querySelectorAll('button[data-step]').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (btn.dataset.money === '1') {
-        if (!confirm('“' + btn.dataset.label + '” sends every fetched article to Claude, '
+        if (!confirm('“' + btn.dataset.label + '” sends each report to Claude (see “Group into reports” above), '
                    + 'which is billed to your API key.\n\nAlready-written articles are '
                    + 'skipped automatically, so only new ones are charged.\n\nContinue?')) return;
       }
