@@ -1,0 +1,87 @@
+{% extends "_base.html" %}
+{% block title %}Reports this run would produce{% endblock %}
+{% block headerextra %}<span class="faint tiny mono">{{ file }}</span>{% endblock %}
+
+{% block body %}
+<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+  <h2 style="margin:0; font-size:15px">{{ title }}</h2>
+  <span class="switcher">
+    {% for ap in all_pipelines %}
+      <a href="/clusters/{{ ap.name }}?mode={{ mode }}" class="chip"
+         {% if ap.name == pipeline %}aria-current="page"{% endif %}>{{ ap.icon }} {{ ap.title }}</a>
+    {% endfor %}
+  </span>
+  <span class="spacer"></span>
+  <a href="/data/{{ pipeline }}">browse the articles →</a>
+</div>
+
+<section class="panel" style="padding:16px 18px; margin-bottom:16px">
+  <strong style="font-size:14px">How many reports would this crawl produce?</strong>
+  <p class="dim small" style="margin:6px 0 12px">
+    {{ total }} crawled article(s). The count depends entirely on how they are grouped —
+    there is no fixed number.
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap">
+    {% for m in modes %}
+      <a href="/clusters/{{ pipeline }}?mode={{ m.value }}" title="{{ m.hint }}"
+         style="text-decoration:none; flex:1 1 230px; padding:12px 14px; border-radius:9px;
+                border:1px solid {{ 'var(--accent)' if m.value == mode else 'var(--line)' }};
+                background:{{ 'var(--accent-soft)' if m.value == mode else 'var(--panel2)' }}">
+        <div style="font-size:24px; font-weight:600; line-height:1.2"
+             class="{{ 'ok' if m.value == mode }}">{{ counts[m.value] }}</div>
+        <div class="small" style="font-weight:550">{{ m.label }}</div>
+        <div class="faint tiny" style="margin-top:3px">{{ m.hint }}</div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+{# "no two articles cover the same event" is only true once there ARE
+   articles. With an empty crawl the old copy stated it as a finding. #}
+<p class="dim small" style="margin:0 0 10px">
+  {% if not total %}
+    <strong>Nothing has been collected yet</strong>, so there is nothing to group.
+    The three numbers above are all zero for that reason — not because the
+    grouping found nothing.
+  {% else %}
+    <strong>{{ rows|length }}</strong> report(s) from {{ total }} article(s) ·
+    <strong>{{ multi }}</strong> would draw on more than one source
+    {% if not multi %}<span class="faint">— no two articles in this crawl cover the same
+    event, so each report has a single source to check against</span>{% endif %}
+  {% endif %}
+</p>
+
+{% for r in rows %}
+<section class="panel" style="margin-bottom:10px">
+  <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+              padding:11px 15px; {% if r.size > 1 %}background:var(--accent-soft);{% endif %}
+              {% if r.members|length > 1 %}border-bottom:1px solid var(--line);{% endif %}">
+    <span class="chip {{ 'chip-next' if r.size > 1 }}">{{ r.size }} source{{ '' if r.size == 1 else 's' }}</span>
+    <strong class="small" style="flex:1; min-width:220px">{{ r.members[0].title }}</strong>
+    {% for t in r.topics %}<span class="chip">{{ t }}</span>{% endfor %}
+    <span class="faint tiny">{{ r.chars }} chars total</span>
+    <a href="/verify/{{ pipeline }}/{{ r.lead }}?stage=crawl" class="small">verify →</a>
+  </div>
+  {% if r.members|length > 1 %}
+  <table style="border-collapse:collapse; width:100%; font-size:13px">
+    {% for m in r.members %}
+    <tr style="{% if not loop.first %}border-top:1px solid var(--line);{% endif %}">
+      <td style="padding:7px 15px; white-space:nowrap"><strong>{{ m.source }}</strong></td>
+      <td style="padding:7px 10px">{{ m.title }}</td>
+      <td style="padding:7px 10px; white-space:nowrap" class="dim">{{ m.date or '—' }}</td>
+      <td style="padding:7px 10px; white-space:nowrap" class="dim">{{ m.chars }} chars</td>
+      <td style="padding:7px 15px; white-space:nowrap">
+        <a href="/verify/{{ pipeline }}/{{ m.i }}?stage=crawl">open →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% if not rows %}
+<div class="panel" style="padding:18px">
+  <p class="dim" style="margin:0">Nothing crawled yet. <a href="/">Run step 1 →</a></p>
+</div>
+{% endif %}
+{% endblock %}

@@ -55,6 +55,7 @@ import crawler                                    # noqa: E402
 
 from rsb_search import config as CFG              # noqa: E402
 from shared import hindi_text                     # noqa: E402
+from shared.datewindow import Window              # noqa: E402
 
 # crawler._fetch uses verify=False; silence the resulting InsecureRequestWarning.
 warnings.filterwarnings("ignore", message=".*Unverified HTTPS.*")
@@ -100,7 +101,9 @@ def crawl_zone(session, zone, per_zone=None, date_from=None, date_to=None,
     """
     code, name, url = zone["c"], zone["n"], zone["u"]
     base = crawler._get_base(url)
-    per_zone = CFG.PER_ZONE if per_zone is None else per_zone
+    # None means UNCAPPED unless the config toggle says otherwise.
+    if per_zone is None:
+        per_zone = CFG.PER_ZONE if CFG.LIMIT_PER_ZONE else None
     min_body = CFG.MIN_BODY_CHARS if min_body is None else min_body
     if delay is None:
         delay = CFG.SLEEP_DETAIL if CFG.USE_CRAWLER_DELAYS else 1.0
@@ -130,7 +133,8 @@ def crawl_zone(session, zone, per_zone=None, date_from=None, date_to=None,
     if verbose:
         print("  %-5s %d releases available" % (code, len(items)))
 
-    for it in items[:per_zone]:
+    wanted = items if per_zone is None else items[:per_zone]
+    for it in wanted:
         try:
             body = crawler._parse_detail(crawler._fetch(session, it["detail_url"]))
         except Exception as e:
@@ -194,21 +198,50 @@ def research_dedup(articles):
 
 
 def run_rsb_crawl(zone_codes=None, per_zone=None, date_from=None, date_to=None,
-                  hindi_only=None, out_file=None, verbose=True):
+                  hindi_only=None, out_file=None, verbose=True, days=None,
+                  keywords=None, keyword_mode="narrow"):
     """Crawl the Hindi edition of the RSB zone portals and write research JSON.
 
     hindi_only=True keeps only articles whose BODY is majority Devanagari, which
     excludes zones like NR that publish Hindi headlines over English text.
+
+    `keywords` keeps only articles matching one of the user's terms. Unlike the web
+    side there is no railway relevance test to combine with — a zone press-release
+    portal publishes nothing else — so `keyword_mode` is accepted for a uniform
+    call signature but both modes filter identically here.
+
+    Date window, in order of precedence:
+        date_from / date_to   an explicit range
+        days                  the last N days, inclusive of today
+        (neither)             CFG.DAYS_BACK
+
+    Pass days=0 for no date filter. Unlike the web side the zone listing carries
+    the date, so filtering happens before any detail page is fetched — a narrow
+    window here genuinely saves requests.
     """
     zone_codes = CFG.DEFAULT_ZONE_CODES if zone_codes is None else zone_codes
-    per_zone = CFG.PER_ZONE if per_zone is None else per_zone
+    if per_zone is None:
+        per_zone = CFG.PER_ZONE if CFG.LIMIT_PER_ZONE else None
     hindi_only = CFG.HINDI_ONLY if hindi_only is None else hindi_only
     zones = hindi_zones(zone_codes)
     out_file = out_file or CFG.CRAWL_OUTPUT
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
 
+    if not (date_from or date_to):
+        if days is not None and int(days) == 0:
+            window = Window.open()
+        else:
+            window = Window.last_days(CFG.DAYS_BACK if days is None else days)
+        date_from = window.start.strftime("%d-%m-%Y") if window.start else None
+        date_to = window.end.strftime("%d-%m-%Y") if window.end else None
+    else:
+        window = Window(start=date_from, end=date_to)
+
     session = requests.Session()
     articles = []
+    if verbose:
+        print("date window: %s | zones: %s"
+              % (window.describe(), ",".join(z["c"] for z in zones)))
     for z in zones:
         if verbose:
             print("\n=== %s — %s ===" % (z["c"], z["n"]))
@@ -218,6 +251,14 @@ def run_rsb_crawl(zone_codes=None, per_zone=None, date_from=None, date_to=None,
         time.sleep(CFG.SLEEP_LISTING)
 
     articles, dups = research_dedup(articles)
+    if keywords:
+        before = len(articles)
+        articles = [a for a in articles
+                    if hindi_text.matches_keywords(keywords, a.get("title"),
+                                        (a.get("body") or "")[:600])]
+        if verbose:
+            print("\nkeywords (%s): kept %d of %d matching %s"
+                  % (keyword_mode, len(articles), before, ", ".join(keywords)))
     if hindi_only:
         before = len(articles)
         articles = [a for a in articles if a["is_hindi_body"]]

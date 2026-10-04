@@ -42,17 +42,52 @@
   </div>
 </section>
 
-{% for label, text in texts %}
-<section class="panel" style="margin-bottom:14px">
-  <div style="display:flex; gap:10px; align-items:baseline; padding:10px 14px;
-              border-bottom:1px solid var(--line)">
-    <strong style="font-size:13px">{{ label }}</strong>
-    <span class="dim" style="font-size:12px">{{ text|length }} chars</span>
-  </div>
-  <pre style="padding:14px; margin:0; font-size:13px; line-height:1.7; color:#dbe1ea;
-              max-height:60vh; overflow:auto">{{ text }}</pre>
-</section>
-{% endfor %}
+<!-- ── source left, AI right, each pane on its own scrollbar ──────────────── -->
+<div class="twopane" style="margin-bottom:16px">
+
+  <section class="panel pane">
+    <div class="panel-head" style="background:var(--panel2)">
+      <strong>Original source</strong>
+      <span class="dim small">what was actually published</span>
+    </div>
+    {% if not source_texts %}
+      <p class="dim" style="padding:16px; margin:0">No source body stored on this article.</p>
+    {% endif %}
+    <div class="pane-scroll">
+      {% for label, text in source_texts %}
+      <div class="fieldhead">
+        <strong class="small">{{ label }}</strong>
+        <span class="faint tiny">{{ text|length }} chars</span>
+      </div>
+      <pre class="prose" style="padding:11px 14px 14px; margin:0; font-size:13.5px;
+                  line-height:1.7; white-space:pre-wrap">{{ text }}</pre>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel pane">
+    <div class="panel-head" style="background:var(--accent-soft)">
+      <strong style="color:var(--accent)">AI generated</strong>
+      <span class="dim small">not verified — compare against the left</span>
+    </div>
+    {% if not ai_texts %}
+      <p class="dim" style="padding:16px; margin:0">
+        No story generated for this article yet. Run step 2 on the
+        <a href="/">control panel</a>.
+      </p>
+    {% endif %}
+    <div class="pane-scroll">
+      {% for label, text in ai_texts %}
+      <div class="fieldhead">
+        <strong class="small">{{ label }}</strong>
+        <span class="faint tiny">{{ text|length }} chars</span>
+      </div>
+      <pre class="prose" style="padding:11px 14px 14px; margin:0; font-size:13.5px;
+                  line-height:1.7; white-space:pre-wrap">{{ text }}</pre>
+      {% endfor %}
+    </div>
+  </section>
+</div>
 
 <section class="panel">
   <div style="padding:10px 14px; border-bottom:1px solid var(--line)">

@@ -48,16 +48,35 @@ SEEN_FILE = os.path.join(OUTPUT_DIR, "web_seen_articles_research.json")
 
 # --------------------------------------------------------- crawl defaults
 
-MAX_PER_SOURCE = 3          # articles kept per publisher per run
+# Per-publisher cap. OFF by default: how many reports a run produces should come
+# from what the publishers actually published in the date window, not from a number
+# hardcoded here. Turn LIMIT_PER_SOURCE on when you deliberately want a small run.
+LIMIT_PER_SOURCE = False
+MAX_PER_SOURCE = 3          # only applied when LIMIT_PER_SOURCE is True
 MIN_BODY_CHARS = 300        # below this the extraction is treated as failed
 REQUEST_DELAY = 1.5         # seconds between article fetches, per publisher
-CANDIDATE_MULTIPLIER = 6    # listing links to consider per article wanted
+CANDIDATE_MULTIPLIER = 6    # listing links per article wanted, when capped
+
+# When uncapped, this is how far down a listing page to scan. Measured: the six tag
+# pages offer 6-24 links each, so this is a safety rail rather than a real limit.
+LISTING_SCAN_LIMIT = 60
 
 # PIB's listing is all-ministry, so railway releases are sparse. Scan far more
 # candidates there and let the relevance filter select.
 PIB_CANDIDATE_LIMIT = 60
 
 RELEVANCE_FILTER = True     # drop non-railway articles (tag pages are ~50% off-topic)
+
+# --------------------------------------------------------- date window
+
+# How many days back from today a crawl accepts, when the caller does not say.
+# The UI offers this as the default and lets a run override it.
+DAYS_BACK = 7
+
+# Articles whose page carries no publishable date at all — Amar Ujala publishes
+# none — are KEPT when a date window is in force. Dropping them would silently
+# lose real articles to prove a filter is working; they are counted instead.
+KEEP_UNDATED = True
 
 # ------------------------------------------------------- link discovery
 

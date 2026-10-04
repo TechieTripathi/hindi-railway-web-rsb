@@ -4,6 +4,10 @@
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 .env
+# Holds TESTSPRITE_API_KEY; Claude Code injects it into tool shells, so the
+# `testsprite` CLI picks it up. The TestSprite MCP server does NOT read it --
+# its key lives in local-scope config in ~/.claude.json, outside this repo.
+.claude/settings.local.json
 
 # ── Virtual environment ──────────────────────────────────────────────────────
 .venv/

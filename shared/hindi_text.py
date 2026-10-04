@@ -210,6 +210,54 @@ def term_in(term, tokens, blob):
     return False
 
 
+#: How user keywords combine with the built-in railway topicality test.
+#:   "narrow"  railway-relevant AND matches a keyword — search within railway news
+#:   "only"    matches a keyword, railway test skipped — the keywords ARE the topic
+KEYWORD_MODES = ("narrow", "only")
+
+
+def parse_keywords(raw):
+    """Split a user's keyword string into terms.
+
+    Commas separate; a term may itself be a multi-word phrase ("वंदे भारत"), which
+    `term_in` matches as a substring rather than a token. Empty input gives [],
+    which every caller reads as "no keyword filter".
+    """
+    if not raw:
+        return []
+    return [t.strip() for t in str(raw).replace("\n", ",").split(",") if t.strip()]
+
+
+def matches_keywords(keywords, *texts):
+    """True if any keyword occurs in `texts`.
+
+    Uses the same stem-comparing `term_in` as the railway filter, which is the whole
+    point of routing user keywords through here: a naive substring test fails on
+    Hindi inflection in BOTH directions — it misses रेलगाड़ी vs रेलगाड़ियों (the stem
+    itself changes, ी -> ि) and it over-matches ट्रेन inside ट्रेनिंग.
+    """
+    if not keywords:
+        return True
+    raw = " ".join(t for t in texts if t)
+    blob = normalize_hi(raw).lower()
+    if not blob:
+        return False
+    tokens = {w.lower() for w in tokenize_hi(raw, min_hi=2, min_en=3)}
+    return any(term_in(k, tokens, blob) for k in keywords)
+
+
+def passes_topic(keywords, mode, *texts):
+    """The single topicality gate a crawl applies to one article.
+
+    No keywords -> the built-in railway test alone, i.e. existing behaviour.
+    """
+    if not keywords:
+        return is_railway_relevant(*texts)
+    if mode == "only":
+        return matches_keywords(keywords, *texts)
+    return is_railway_relevant(*texts) and matches_keywords(keywords, *texts)
+
+
 def is_railway_relevant(*texts):
     """Two-tier railway topicality test.
 

@@ -8,138 +8,194 @@
 {% block body %}
 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:6px">
   <h2 style="margin:0; font-size:15px">{{ title }}</h2>
-  <a class="btn btn-sm" href="/data/{{ 'rsb' if pipeline == 'web' else 'web' }}"
-     style="text-decoration:none">switch to {{ 'official press releases' if pipeline == 'web' else 'Hindi publishers' }}</a>
+  {# Built from the registry, so a third pipeline shows up here on its own. #}
+  <span class="switcher">
+    {% for ap in all_pipelines %}
+      <a href="/data/{{ ap.name }}?stage={{ stage }}" class="chip"
+         {% if ap.name == pipeline %}aria-current="page"{% endif %}>{{ ap.icon }} {{ ap.title }}</a>
+    {% endfor %}
+  </span>
 </div>
 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px">
-  <span class="dim small">Show:</span>
+  <span class="dim small">Stage:</span>
   {% for s in stages %}
-    <a href="/data/{{ pipeline }}?stage={{ s.key }}" class="pill"
-       style="text-decoration:none;
-              color:{{ 'var(--accent)' if s.key == stage else 'var(--dim)' }};
-              border-color:{{ 'var(--accent)' if s.key == stage else 'var(--line)' }}">
-      {{ s.label }} · {{ s.count }}
+    <a href="/data/{{ pipeline }}?stage={{ s.key }}"
+       class="stagepill tone-{{ s.tone }}{{ ' empty' if not s.count }}"
+       {% if s.key == stage %}aria-current="page"{% endif %}
+       title="{{ s.what }}{% if not s.count %}&#10;&#10;Nothing here yet — this stage has not been run.{% endif %}">
+      <span class="step">{{ s.n }}</span>{{ s.name }}
+      <span class="n">{{ s.count }}</span>
     </a>
+    {% if not loop.last %}<span class="stagearrow">→</span>{% endif %}
   {% endfor %}
   <span style="flex:1"></span>
   <form method="get" action="/data/{{ pipeline }}" style="display:flex; gap:6px">
     <input type="hidden" name="stage" value="{{ stage }}">
-    <input name="q" value="{{ q }}" placeholder="filter title / body / source"
-           style="font:inherit; background:#0e1116; color:var(--ink); width:230px;
-                  border:1px solid var(--line); border-radius:4px; padding:4px 8px">
+    {# type=text is load-bearing: the base stylesheet targets input[type=text],
+       which does NOT match an input with the attribute absent. Without it this
+       box fell back to a hardcoded dark background and was unreadable in the
+       light palette. #}
+    <input type="text" name="q" value="{{ q }}"
+           placeholder="filter title / body / source" style="width:230px">
     <button type="submit" style="padding:4px 12px">filter</button>
     {% if q %}<a href="/data/{{ pipeline }}?stage={{ stage }}" class="dim"
                  style="align-self:center; font-size:12.5px">clear</a>{% endif %}
   </form>
 </div>
 
+{% for s in stages if s.key == stage %}
+<p class="small" style="margin:0 0 10px; display:flex; gap:8px; align-items:baseline">
+  <span class="chip tone-{{ s.tone }}"
+        style="background:var(--tone); color:#fff; border-color:transparent">step {{ s.n }}</span>
+  <span class="dim">You are looking at the <strong>{{ s.name }}</strong> stage — {{ s.what }}</span>
+</p>
+{% endfor %}
+{% if rows %}
 <p class="dim small" style="margin:0 0 10px">
   Showing <strong>{{ rows|length }}</strong> of {{ total }} article(s){% if q %}
   matching “{{ q }}”{% endif %}. The <em>content</em> column is shortened — click
-  <span style="color:var(--accent)">full →</span> on any row to read the whole thing.
+  <strong>verify →</strong> on any row for the source and the AI output side by side,
+  with the scores.
 </p>
 
 <details class="panel" style="padding:11px 15px; margin-bottom:14px">
   <summary>What do these columns mean?</summary>
   <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
               gap:9px 22px; margin-top:11px" class="small">
-    <div><strong>source</strong> — which publisher or railway zone it came from.</div>
-    <div><strong>source page</strong> — the listing page the article was found on. Open
-         this first when a publisher changes their site layout.</div>
-    <div><strong>article URL</strong> — the page the text was read from.</div>
-    <div><strong>content</strong> — the opening of the article body, shortened.</div>
-    <div><strong>chars</strong> — how much body text was extracted. Orange under 300
-         means extraction probably failed quietly.</div>
-    {% if pipeline == 'web' %}
-    <div><strong>extractor</strong> — which rule found the text. Orange
-         <code>generic</code> means that site's specific rule stopped working.</div>
-    {% else %}
-    <div><strong>body hi</strong> — how much of the text is actually Devanagari. Some
-         zones publish Hindi headlines over English text.</div>
-    {% endif %}
-    <div><strong>story</strong> — whether the AI has written this one yet.</div>
-    <div><strong>fact/cov</strong> — the AI's own confidence score, then the measured
-         share of source figures it carried over. Full definitions in
+    <div><strong>source</strong> — the publisher or railway zone, the publication date,
+         and <strong>listing</strong>: the page the article was found on. Open that first
+         when a publisher changes their site layout. An orange
+         <span class="warn">*</span> means the listing was not recorded on the article
+         and has been guessed from the source config.</div>
+    <div><strong>article</strong> — the title, then the opening of the body (shortened),
+         then how it was read: <strong>chars</strong> of body text extracted (orange
+         under 300 means extraction probably failed quietly),
+         {% if pipeline == 'web' %}which <strong>extraction rule</strong> found the text
+         (orange <code>generic</code> means that site's specific rule stopped working),
+         {% else %}how much of the text is actually <strong>Devanagari</strong> — some
+         zones publish Hindi headlines over English text, {% endif %}
+         and a link to the article page itself.</div>
+    <div><strong>quality</strong> — whether the AI has written this one, and once scored:
+         <strong>fact</strong>, the AI's own confidence; <strong>cov</strong>, the measured
+         share of source figures it carried over; and <strong>plag</strong>, the share of
+         the story's 4-word phrases that also appear in the source, calculated locally.
+         Plagiarism is <em>lower is better</em> — green at 20% or under, orange to 35%,
+         red above — and a dash means the texts were too short to compare. A ⚠ on
+         fact/cov means a hard gate failed. Full definitions in
          <code>research/docs/METRICS.md</code>.</div>
   </div>
 </details>
+{% endif %}
+
 
 {% if not rows %}
   <div class="panel" style="padding:18px">
     <p class="dim" style="margin:0">
       {% if q %}No article matches “{{ q }}”.
         <a href="/data/{{ pipeline }}?stage={{ stage }}">Clear the filter</a>.
-      {% else %}Nothing here yet — this stage has not been run.
-        <a href="/">Go and run it →</a>{% endif %}
+      {% else %}<strong>Nothing here yet.</strong>
+        The <em>{{ stage_label }}</em> stage has not been run, so there is
+        nothing to show. Each stage is filled by the matching step on the
+        control panel.
+        <a href="/">Go to the control panel →</a>{% endif %}
     </p>
   </div>
 {% else %}
 <div class="panel" style="overflow-x:auto">
-<table style="border-collapse:collapse; width:100%; font-size:13px">
+{# Five columns, not thirteen. The old layout gave a whole column each to the two
+   URLs (649px of 2090 between them) and to `extractor` (203px for values like
+   "generic"), which forced a horizontal scrollbar on every screen. Nothing has
+   been dropped — the same fields are grouped by what a reader is actually asking:
+   WHERE it came from, WHAT it says, HOW good it is. Only `article` is allowed to
+   flex; every other column is sized to its content. #}
+<table class="browse" style="border-collapse:collapse; width:100%; font-size:13px;
+       table-layout:auto">
   <thead>
     <tr style="text-align:left; color:var(--dim); border-bottom:1px solid var(--line)">
-      <th style="padding:9px 10px">#</th>
-      <th style="padding:9px 10px">source</th>
-      <th style="padding:9px 10px" title="The listing page this article was found on">source page</th>
-      <th style="padding:9px 10px" title="The page the article text was read from">article URL</th>
-      <th style="padding:9px 10px">date</th>
-      <th style="padding:9px 10px; min-width:240px">title</th>
-      <th style="padding:9px 10px; min-width:300px">content</th>
-      <th style="padding:9px 10px">chars</th>
-      {% if pipeline == 'web' %}<th style="padding:9px 10px">extractor</th>
-      {% else %}<th style="padding:9px 10px">body hi</th>{% endif %}
-      {% if stage != 'crawl' %}<th style="padding:9px 10px">story</th>{% endif %}
-      {% if stage == 'scored' %}<th style="padding:9px 10px">fact/cov</th>{% endif %}
-      <th style="padding:9px 10px"></th>
+      <th style="padding:9px 10px; width:1%">#</th>
+      <th style="padding:9px 10px; width:1%; white-space:nowrap"
+          title="Publisher or railway zone, when it was published, and the listing page it was found on">source</th>
+      <th style="padding:9px 10px">article</th>
+      {% if stage != 'crawl' %}
+      <th style="padding:9px 10px; width:1%; white-space:nowrap"
+          title="Whether the AI has written this one, and how it scored">quality</th>
+      {% endif %}
+      <th style="padding:9px 10px; width:1%"></th>
     </tr>
   </thead>
   <tbody>
   {% for r in rows %}
     <tr style="border-bottom:1px solid var(--line); vertical-align:top">
       <td style="padding:9px 10px" class="dim">{{ r.i }}</td>
-      <td style="padding:9px 10px; white-space:nowrap" title="{{ r.source }}">{{ r.source_label }}</td>
+
+      {# WHERE: publisher, date, and the listing page, stacked. #}
       <td style="padding:9px 10px; white-space:nowrap">
+        <div title="{{ r.source }}">{{ r.source_label }}</div>
+        <div class="dim tiny">{{ r.date or 'no date' }}</div>
         {% if r.listing %}
-          <a href="{{ r.listing }}" target="_blank" rel="noreferrer" class="mono tiny"
+          <a href="{{ r.listing }}" target="_blank" rel="noreferrer" class="tiny"
              style="color:{{ 'var(--accent)' if r.listing_exact else 'var(--warn)' }}"
              title="{{ r.listing }}&#10;&#10;{{ 'Recorded at crawl time.' if r.listing_exact
                         else 'Not recorded on this article — resolved from the source config, so it is a guess.' }}">
-            {{ r.listing_label }}</a>{% if not r.listing_exact %} <span class="warn" title="guessed">*</span>{% endif %}
-        {% else %}<span class="dim">—</span>{% endif %}
+            listing{% if not r.listing_exact %} <span class="warn">*</span>{% endif %}</a>
+        {% endif %}
       </td>
-      <td style="padding:9px 10px; white-space:nowrap">
-        <a href="{{ r.link }}" target="_blank" rel="noreferrer" class="mono tiny"
-           title="{{ r.link }}" style="color:var(--accent)">{{ r.link_label }}</a>
+
+      {# WHAT: title, the shortened body, then the extraction facts as one line.
+         This is the only column without a fixed width, so it absorbs the slack. #}
+      <td style="padding:9px 10px">
+        <div style="font-weight:550; line-height:1.4">{{ r.title }}</div>
+        <div class="dim" style="margin-top:2px">{{ r.snippet }}</div>
+        <div class="tiny" style="margin-top:4px; display:flex; gap:10px; flex-wrap:wrap">
+          <span class="{{ 'warn' if r.short else 'faint' }}"
+                title="{{ 'under 300 chars — extraction likely failed silently' if r.short
+                          else 'characters of body text extracted' }}">
+            {{ r.chars }} chars{% if r.short %} ⚠{% endif %}</span>
+          {% if pipeline == 'web' %}
+            <span class="{{ 'warn' if r.generic else 'faint' }}"
+                  title="{{ 'generic <p> sweep — this domain’s selector has drifted'
+                            if r.generic else 'which extraction rule found the text' }}">
+              {{ r.extractor or '—' }}</span>
+          {% else %}
+            <span class="{{ 'faint' if r.is_hindi else 'warn' }}"
+                  title="how much of the body is actually Devanagari">
+              {{ '%.0f%%'|format((r.body_hindi or 0) * 100) }} Devanagari</span>
+          {% endif %}
+          <a href="{{ r.link }}" target="_blank" rel="noreferrer" class="mono"
+             title="{{ r.link }}" style="color:var(--accent)">{{ r.link_label }}</a>
+        </div>
       </td>
-      <td style="padding:9px 10px; white-space:nowrap">{{ r.date or '—' }}</td>
-      <td style="padding:9px 10px; max-width:300px">{{ r.title }}</td>
-      <td class="dim" style="padding:9px 10px; max-width:440px">{{ r.snippet }}</td>
-      <td style="padding:9px 10px" class="{{ 'warn' if r.short }}"
-          title="{{ 'under 300 chars — extraction likely failed silently' if r.short }}">
-        {{ r.chars }}{% if r.short %} ⚠{% endif %}
-      </td>
-      {% if pipeline == 'web' %}
-        <td style="padding:9px 10px" class="{{ 'warn' if r.generic }}"
-            title="{{ 'generic <p> sweep — this domain’s selector has drifted' if r.generic }}">
-          {{ r.extractor or '—' }}</td>
-      {% else %}
-        <td style="padding:9px 10px" class="{{ '' if r.is_hindi else 'warn' }}">
-          {{ '%.0f%%'|format((r.body_hindi or 0) * 100) }}</td>
-      {% endif %}
+
+      {# HOW GOOD: the three signals that only exist once a story has been written. #}
       {% if stage != 'crawl' %}
-        <td style="padding:9px 10px" class="{{ 'ok' if r.has_story else 'err' }}">
-          {{ 'yes' if r.has_story else 'no' }}</td>
-      {% endif %}
-      {% if stage == 'scored' %}
-        <td style="padding:9px 10px; white-space:nowrap"
-            class="{{ '' if r.gates_passed else 'warn' }}">
-          {{ r.fact if r.fact is not none else '—' }} /
-          {{ r.coverage if r.coverage is not none else '—' }}
-          {%- if not r.gates_passed %} ⚠{% endif %}</td>
-      {% endif %}
       <td style="padding:9px 10px; white-space:nowrap">
-        <a href="/data/{{ pipeline }}/{{ r.i }}?stage={{ stage }}"
-           style="color:var(--accent)">full →</a>
+        {# Not-yet-generated is not a failure, so it is dim, not red. #}
+        <div class="{{ 'ok' if r.has_story else 'dim' }}">
+          {{ 'story ✓' if r.has_story else 'not written yet' }}</div>
+        {% if stage == 'scored' %}
+          <div class="tiny {{ '' if r.gates_passed else 'warn' }}"
+               title="the AI's own confidence, then the share of source figures carried over{{
+                      ' — a gate failed' if not r.gates_passed }}">
+            fact {{ r.fact if r.fact is not none else '—' }} ·
+            cov {{ r.coverage if r.coverage is not none else '—' }}
+            {%- if not r.gates_passed %} ⚠{% endif %}</div>
+        {% endif %}
+        <div class="tiny {{ 'faint' if r.plagiarism is none or r.plagiarism_na
+                            else 'ok' if r.plagiarism <= 20
+                            else 'warn' if r.plagiarism <= 35 else 'err' }}"
+             title="{{ r.plagiarism_detail or 'Not scored.' }}">
+          plag {% if r.plagiarism is none or r.plagiarism_na %}—
+          {%- else %}{{ r.plagiarism }}%{% endif %}</div>
+      </td>
+      {% endif %}
+
+      <td style="padding:9px 10px; white-space:nowrap">
+        <a href="/verify/{{ pipeline }}/{{ r.i }}?stage={{ stage }}"
+           class="btn btn-sm btn-primary" style="text-decoration:none">verify →</a>
+        <div style="margin-top:5px">
+          <a href="/data/{{ pipeline }}/{{ r.i }}?stage={{ stage }}"
+             class="faint tiny">raw fields</a>
+        </div>
       </td>
     </tr>
   {% endfor %}
