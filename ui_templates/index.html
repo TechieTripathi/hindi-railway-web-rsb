@@ -52,7 +52,10 @@
 {# One pipeline per window now, so the grid holds a single full-width panel. #}
 <div style="display:grid; gap:20px">
 {% for p in pipelines %}
-  <section class="panel" data-pipeline="{{ p.name }}">
+  <section class="panel" data-pipeline="{{ p.name }}"
+           data-report-counts='{{ p.estimate.counts|tojson }}'
+           data-written='{{ p.estimate.skipped|tojson }}'
+           data-checked='{{ p.estimate.checked|tojson }}'>
     <div style="padding:16px 18px; border-bottom:1px solid var(--line)">
       <h2 style="margin:0 0 4px; font-size:15px">{{ p.title }}</h2>
       <p class="dim small" style="margin:0">{{ p.friendly }}</p>
@@ -93,7 +96,9 @@
                   data-total="{{ p.estimate.total }}">
               {%- if p.estimate.total -%}
                 <strong>{{ p.estimate.counts['story'] }}</strong> report(s) from
-                {{ p.estimate.total }} article(s) · ~{{ p.estimate.calls['story'] }} AI call(s)
+                {{ p.estimate.total }} selected article(s) · ~{{ p.estimate.calls['story'] }} AI call(s)
+              {%- elif p.steps[0].view -%}
+                No articles selected for AI. <a href="/data/{{ p.name }}?stage=crawl">Include articles</a>.
               {%- else -%}
                 No articles collected yet — run <strong>step 1</strong> below first.
               {%- endif -%}
@@ -187,10 +192,10 @@
     </div>
 
     {% for s in p.steps %}
-    <div style="display:flex; gap:13px; padding:15px 18px;
+    <div data-stage-row="{{ s.key }}" style="display:flex; gap:13px; padding:15px 18px;
                 {% if not loop.last %}border-bottom:1px solid var(--line);{% endif %}
                 {% if s.is_next %}background:var(--accent-soft);{% endif %}">
-      <span class="chip {{ 'chip-next' if s.is_next else ('chip-ok' if s.view else '') }}"
+      <span class="chip step-indicator {{ 'chip-next' if s.is_next else ('chip-ok' if s.view else '') }}"
             style="height:23px; min-width:26px; justify-content:center">
         {{ '✓' if s.view and not s.is_next else s.meta.n }}
       </span>
@@ -206,6 +211,13 @@
           {% elif s.is_next %}<span class="chip chip-next">do this next</span>{% endif %}
         </div>
         <div class="dim small" style="margin-top:2px">{{ s.meta.what }}</div>
+        {% if s.key == 'crawl' %}
+        <div class="small" style="margin-top:5px">A new fetch clears previous AI stories and quality checks.</div>
+        {% endif %}
+        {% if s.key == 'generate' %}
+        <div class="small" style="margin-top:5px">{{ p.estimate.total }} selected for AI ·
+          <a href="/data/{{ p.name }}?stage=crawl">Review selection</a></div>
+        {% endif %}
         {# The only billed step, so it is the only one that states a number.
            Read off the SAME clustering the run will do, and the same resume
            rule, so the figure matches what actually happens. #}
@@ -224,15 +236,20 @@
             {%- else -%}
             <span>nothing to write yet — run step 1 first</span>
             {%- endif -%}</span>
-          {% if p.estimate.done %}
-            <span class="dim">· {{ p.estimate.done }} already written and will be skipped</span>
-          {% endif %}
+          <span class="dim est-skipped" data-skipped='{{ p.estimate.skipped|tojson }}'
+                {% if not p.estimate.done %}hidden{% endif %}>· {{ p.estimate.done }} selected report(s) already written and will be skipped</span>
           <span class="faint">· change <em>reports</em> above to spend less</span>
         </div>
         {% endif %}
 
         <div class="small" style="margin-top:7px">
-          {% if s.view %}
+          {% if s.key in ['generate', 'score'] %}
+            <span class="{{ 'ok' if s.view else 'dim' }} selected-detail" data-stage="{{ s.key }}">{{ s.detail }}</span>
+            <a class="selected-output" data-stage="{{ s.key }}" {% if not s.view %}hidden{% endif %}
+               href="/data/{{ p.name }}?stage={{ 'agency' if s.key == 'generate' else 'scored' }}&selection=selected&mode=story">View selected results →</a>
+            {% if s.key == 'score' %}<div class="dim score-lock" {% if not s.why %}hidden{% endif %}>{{ s.why }}</div>
+            {% elif s.why %}<div class="dim">{{ s.why }}</div>{% endif %}
+          {% elif s.view %}
             <span class="ok">✓ {{ s.detail }}</span>
             · <a href="/data/{{ p.name }}?stage={{ {'crawl':'crawl','generate':'agency','score':'scored'}[s.key] }}">see the {{ s.view }} articles →</a>
           {% elif s.running %}
@@ -252,6 +269,7 @@
       </div>
 
       <button data-step="{{ s.key }}" data-label="{{ s.meta.label }}"
+              data-start-label="{{ s.meta.button }}" data-busy="{{ 1 if s.busy or s.running else 0 }}"
               data-money="{{ 1 if s.meta.costs_money else 0 }}"
               class="{{ 'btn-primary' if s.is_next }}"
               {{ 'disabled' if not s.enabled }}
@@ -368,6 +386,44 @@ function refreshEstimate(section) {
     try { calls = JSON.parse(out.dataset.estimate); } catch (e) { calls = null; }
     if (calls && sel.value in calls) out.textContent = calls[sel.value];
   }
+  const skipped = section.querySelector('.est-skipped');
+  if (skipped) {
+    const count = JSON.parse(skipped.dataset.skipped)[sel.value] || 0;
+    skipped.hidden = count === 0;
+    skipped.textContent = '· ' + count + ' selected report(s) already written and will be skipped';
+  }
+  const countsByMode = JSON.parse(section.dataset.reportCounts);
+  const writtenByMode = JSON.parse(section.dataset.written);
+  const checkedByMode = JSON.parse(section.dataset.checked);
+  section.querySelectorAll('.selected-detail').forEach(el => {
+    const written = writtenByMode[sel.value];
+    const count = el.dataset.stage === 'generate' ? written : checkedByMode[sel.value];
+    el.textContent = el.dataset.stage === 'generate'
+      ? written + ' of ' + countsByMode[sel.value] + ' selected reports have a story'
+      : count + ' selected reports checked';
+    el.className = (count ? 'ok' : 'dim') + ' selected-detail';
+    const row = el.closest('[data-stage-row]');
+    const indicator = row.querySelector('.step-indicator');
+    indicator.textContent = count ? '✓' : (el.dataset.stage === 'generate' ? '2' : '3');
+    indicator.classList.toggle('chip-ok', count > 0);
+    const button = row.querySelector('button[data-step]');
+    button.textContent = count ? 'Run again' : button.dataset.startLabel;
+    if (el.dataset.stage === 'score') {
+      button.disabled = button.dataset.busy === '1' || written === 0;
+      const lock = row.querySelector('.score-lock');
+      lock.hidden = written > 0 && button.dataset.busy !== '1';
+      if (button.dataset.busy !== '1') {
+        lock.textContent = 'Generate the selected reports first.';
+        button.title = written ? button.dataset.label : lock.textContent;
+      }
+    }
+  });
+  section.querySelectorAll('.selected-output').forEach(el => {
+    el.hidden = !(el.dataset.stage === 'generate' ? writtenByMode[sel.value] : checkedByMode[sel.value]);
+    const url = new URL(el.href);
+    url.searchParams.set('mode', sel.value);
+    el.href = url.href;
+  });
 
   // the count under the grouping field, and why this option costs what it does
   const cnt = section.querySelector('.group-count');
@@ -382,7 +438,7 @@ function refreshEstimate(section) {
     // leave it alone rather than replacing it with zeros.
     if (total && sel.value in counts) {
       cnt.innerHTML = '<strong>' + counts[sel.value] + '</strong> report(s) from '
-        + total + ' article(s) · ~' + calls2[sel.value] + ' AI call(s)';
+        + total + ' selected article(s) · ~' + calls2[sel.value] + ' AI call(s)';
     }
   }
   const why = section.querySelector('.group-why');

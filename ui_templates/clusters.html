@@ -18,7 +18,7 @@
 <section class="panel" style="padding:16px 18px; margin-bottom:16px">
   <strong style="font-size:14px">How many reports would this crawl produce?</strong>
   <p class="dim small" style="margin:6px 0 12px">
-    {{ total }} crawled article(s). The count depends entirely on how they are grouped —
+    {{ total }} selected article(s). The count depends entirely on how they are grouped —
     there is no fixed number.
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap">
@@ -40,7 +40,7 @@
    articles. With an empty crawl the old copy stated it as a finding. #}
 <p class="dim small" style="margin:0 0 10px">
   {% if not total %}
-    <strong>Nothing has been collected yet</strong>, so there is nothing to group.
+    <strong>No articles selected for AI</strong>, so there is nothing to group.
     The three numbers above are all zero for that reason — not because the
     grouping found nothing.
   {% else %}
@@ -81,7 +81,7 @@
 
 {% if not rows %}
 <div class="panel" style="padding:18px">
-  <p class="dim" style="margin:0">Nothing crawled yet. <a href="/">Run step 1 →</a></p>
+  <p class="dim" style="margin:0">No articles selected. <a href="/data/{{ pipeline }}?stage=crawl">Review fetched articles →</a></p>
 </div>
 {% endif %}
 {% endblock %}

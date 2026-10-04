@@ -26,11 +26,13 @@ Safety properties, same as the notebooks
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import io
 import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import traceback
 
@@ -354,8 +356,8 @@ BACKUP_DIR = os.path.join(config_web.OUTPUT_DIR, "backups")
 KEEP_BACKUPS = 10
 
 
-def _backup(path: str, job: "Job") -> None:
-    """Copy a crawl output aside before a new crawl overwrites it.
+def _backup(path: str, job: "Job | None") -> None:
+    """Copy an output aside before a new crawl replaces or clears it.
 
     `research/output/` is the only copy of the corpus and README records it being lost
     once. A crawl is destructive: `run_*_crawl` opens the output file with "w".
@@ -368,7 +370,7 @@ def _backup(path: str, job: "Job") -> None:
     dest = os.path.join(BACKUP_DIR, "%s.%s.json" % (base[:-5] if base.endswith(".json") else base, stamp))
     with open(path, "rb") as src, open(dest, "wb") as out:
         out.write(src.read())
-    job.log("backed up %d article(s) -> %s"
+    (job.log if job else print)("backed up %d article(s) -> %s"
             % (len(_read_json(path) or []), os.path.relpath(dest, _PROJECT_ROOT)))
 
     prefix = base[:-5] if base.endswith(".json") else base
@@ -703,6 +705,7 @@ def _plagiarism_not_comparable(article: dict) -> bool:
 
 def _rows(pipeline: str, stage: str) -> list[dict]:
     arts = _read_json(_stage_path(pipeline, stage)) or []
+    excluded = _excluded_keys(pipeline, arts) if stage == "crawl" else set()
     fallback = _listing_fallback(pipeline)
     rows = []
     for i, a in enumerate(arts):
@@ -710,6 +713,8 @@ def _rows(pipeline: str, stage: str) -> list[dict]:
         body = a.get("body") or ""
         rows.append({
             "i": i,
+            "article_key": _article_key(a),
+            "excluded": _article_key(a) in excluded,
             "source": a.get("source") or a.get("zone_name") or "",
             "source_label": _short_source(a.get("source") or a.get("zone_name") or ""),
             "listing": listing,
@@ -764,6 +769,65 @@ def _available_stages(pipeline: str) -> list[dict]:
     return out
 
 
+_SELECTION_LOCK = threading.RLock()
+
+
+def _article_key(article: dict) -> str:
+    link = (article.get("link") or "").strip()
+    identity = ["link", link] if link else [
+        "fields", article.get("title") or "",
+        article.get("source") or article.get("zone_name") or "",
+        article.get("date") or ""]
+    return hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _selection_path(pipeline: str) -> str:
+    return os.path.join(PIPELINES[pipeline]["cfg"].OUTPUT_DIR,
+                        "%s_crawl_selection_research.json" % pipeline)
+
+
+def _write_selection(pipeline: str, excluded: set[str]) -> None:
+    path = _selection_path(pipeline)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"excluded_keys": sorted(excluded)}, fh, indent=2)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def _excluded_keys(pipeline: str, arts: list, *, after_crawl: bool = False) -> set[str]:
+    with _SELECTION_LOCK:
+        path = _selection_path(pipeline)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                stored = set(json.load(fh)["excluded_keys"])
+        except FileNotFoundError:
+            return set()
+        current = stored & {_article_key(a) for a in arts}
+        job = CURRENT
+        crawling = job is not None and job.pipeline == pipeline and job.step == "crawl"
+        # A browser refresh can read a partially written crawl while step 1 runs.
+        if current != stored and (after_crawl or not crawling):
+            _write_selection(pipeline, current)
+        return current
+
+
+def _selection_summary(arts: list, excluded: set[str]) -> dict:
+    count = sum(_article_key(a) in excluded for a in arts)
+    return {"total": len(arts), "selected": len(arts) - count,
+            "excluded": count, "excluded_keys": sorted(excluded)}
+
+
+def _selected_articles(pipeline: str) -> list[dict]:
+    arts = _read_json(_stage_path(pipeline, "crawl")) or []
+    excluded = _excluded_keys(pipeline, arts)
+    return [a for a in arts if _article_key(a) not in excluded]
+
+
 def _mode_counts(pipeline: str) -> dict:
     """Reports each grouping mode would produce, from the current crawl file.
 
@@ -771,7 +835,7 @@ def _mode_counts(pipeline: str) -> dict:
     which is the whole point of showing it before step 2 is run. Shared with the
     `/clusters` route so the panel and the preview can never disagree.
     """
-    arts = _read_json(_stage_path(pipeline, "crawl")) or []
+    arts = _selected_articles(pipeline)
     if not arts:
         return {m: 0 for m in clustering.MODES}
     return {m: len(clustering.build_clusters(arts, mode=m)) for m in clustering.MODES}
@@ -799,16 +863,20 @@ def _run_estimate(pipeline: str) -> dict:
     already been billed and is retried once (max 2 attempts per article).
     """
     cfg = PIPELINES[pipeline]["cfg"]
-    arts = _read_json(_stage_path(pipeline, "crawl")) or []
+    arts = _selected_articles(pipeline)
     done = {_resume_key(a.get("title"))
             for a in (_read_json(cfg.AGENCY_OUTPUT) or [])
             if engine._is_real_story(a.get("ai_news_story"))}
-    counts, calls = {}, {}
+    scored = {_resume_key(a.get("title")) for a in (_read_json(cfg.SCORED_OUTPUT) or [])}
+    counts, calls, skipped, checked = {}, {}, {}, {}
     for m in clustering.MODES:
         groups = clustering.build_clusters(arts, mode=m) if arts else []
         counts[m] = len(groups)
         calls[m] = sum(1 for c in groups if _resume_key(c["title"]) not in done)
-    return {"counts": counts, "done": len(done), "calls": calls,
+        skipped[m] = counts[m] - calls[m]
+        checked[m] = sum(1 for c in groups if _resume_key(c["title"]) in done & scored)
+    return {"counts": counts, "done": skipped["story"], "calls": calls,
+            "skipped": skipped, "checked": checked,
             # `total` is what makes an empty pipeline explainable: zero reports
             # because zero articles is a different message from zero reports
             # because everything is already written.
@@ -827,8 +895,9 @@ def _state(name: str) -> dict:
     cur = CURRENT
     running = cur is not None and cur.pipeline == name
     busy = cur is not None
-    counts = {"crawl": crawl["count"], "generate": agency["count"],
-              "score": scored["count"]}
+    estimate = _run_estimate(name)
+    counts = {"crawl": crawl["count"], "generate": estimate["skipped"]["story"],
+              "score": estimate["checked"]["story"]}
     overrides = PIPELINES[name].get("step_what", {})
 
     def meta(key):
@@ -842,7 +911,7 @@ def _state(name: str) -> dict:
     next_step = None
     for key in ("crawl", "generate", "score"):
         if not counts[key]:
-            prereq = {"crawl": True, "generate": bool(counts["crawl"]),
+            prereq = {"crawl": True, "generate": bool(estimate["total"]),
                       "score": bool(counts["generate"])}[key]
             if prereq:
                 next_step = key
@@ -858,7 +927,7 @@ def _state(name: str) -> dict:
         "crawl_units": _crawl_units(name),
         "day_choices": _day_choices(name),
         "cluster_modes": CLUSTER_MODES,
-        "estimate": _run_estimate(name),
+        "estimate": estimate,
         "keyword_modes": KEYWORD_MODES,
         "selectable": _selectable(name),
         "select_label": "%s to crawl" % PIPELINES[name]["source_word_plural"],
@@ -870,20 +939,20 @@ def _state(name: str) -> dict:
              "view": crawl["count"] or 0,
              "meta": meta("crawl"), "is_next": next_step == "crawl"},
             {"key": "generate", "label": "2 · Write stories with AI",
-             "enabled": not busy and bool(crawl["count"]),
-             "why": "" if crawl["count"] else "do step 1, Fetch articles, first",
+             "enabled": not busy and bool(estimate["total"]),
+             "why": ("" if estimate["total"] else "include at least one fetched article"
+                     if crawl["count"] else "do step 1, Fetch articles, first"),
              "artifact": agency,
-             "detail": ("%s of %s articles have a story"
-                        % (_generated_count(cfg.AGENCY_OUTPUT), agency["count"]))
-                       if agency["count"] is not None else "not generated yet",
-             "view": agency["count"] or 0,
+             "detail": "%s of %s selected reports have a story"
+                       % (counts["generate"], estimate["counts"]["story"]),
+             "view": counts["generate"],
              "meta": meta("generate"), "is_next": next_step == "generate"},
             {"key": "score", "label": "3 · Check quality",
-             "enabled": not busy and bool(agency["count"]),
-             "why": "" if agency["count"] else "do step 2, Write stories with AI, first",
+             "enabled": not busy and bool(counts["generate"]),
+             "why": "" if counts["generate"] else "do step 2, Write stories with AI, first",
              "artifact": scored,
-             "detail": "%s scored" % scored["count"] if scored["count"] is not None else "not scored yet",
-             "view": scored["count"] or 0,
+             "detail": "%s selected reports checked" % counts["score"],
+             "view": counts["score"],
              "meta": meta("score"), "is_next": next_step == "score"},
         ],
     }
@@ -936,6 +1005,30 @@ def _cap(p: dict, key: str):
     return int(raw) if raw else None
 
 
+def _clear_downstream(job: Job | None, pipeline: str) -> None:
+    cfg = PIPELINES[pipeline]["cfg"]
+    paths = (cfg.AGENCY_OUTPUT, cfg.SCORED_OUTPUT)
+    for path in paths:
+        _backup(path, job)
+    for path in paths:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    (job.log if job else print)("Previous AI stories and quality checks cleared for this fetch.")
+
+
+def _clear_stale_outputs(pipeline: str) -> None:
+    """Repair results left by older UI processes that did not reset on fetch."""
+    cfg = PIPELINES[pipeline]["cfg"]
+    if not os.path.exists(cfg.CRAWL_OUTPUT):
+        return
+    if ((os.path.exists(cfg.AGENCY_OUTPUT)
+         and os.path.getmtime(cfg.AGENCY_OUTPUT) < os.path.getmtime(cfg.CRAWL_OUTPUT))
+            or (not os.path.exists(cfg.AGENCY_OUTPUT) and os.path.exists(cfg.SCORED_OUTPUT))):
+        _clear_downstream(None, pipeline)
+
+
 def _step_web_crawl(job: Job, p: dict) -> str:
     n = _cap(p, "max_per_source")
     days = _days_param(p)
@@ -948,10 +1041,12 @@ def _step_web_crawl(job: Job, p: dict) -> str:
                "none" if not kw else "%s [%s]" % (", ".join(kw), kw_mode),
                os.path.relpath(config_web.CRAWL_OUTPUT, _PROJECT_ROOT)))
     _backup(config_web.CRAWL_OUTPUT, job)
+    _clear_downstream(job, "web")
     arts = web_pipeline.run_hindi_crawl(
         max_per_source=n, days=days, source_names=picked,
         keywords=kw, keyword_mode=kw_mode,
         out_file=config_web.CRAWL_OUTPUT, verbose=True)
+    _excluded_keys("web", arts, after_crawl=True)
     return _crawl_summary(job, arts)
 
 
@@ -967,10 +1062,12 @@ def _step_rsb_crawl(job: Job, p: dict) -> str:
                ",".join(zones), "none" if not kw else "%s [%s]" % (", ".join(kw), kw_mode),
                os.path.relpath(config_rsb.CRAWL_OUTPUT, _PROJECT_ROOT)))
     _backup(config_rsb.CRAWL_OUTPUT, job)
+    _clear_downstream(job, "rsb")
     arts = rsb_pipeline.run_rsb_crawl(
         zone_codes=zones, per_zone=n, hindi_only=hindi_only, days=days,
         keywords=kw, keyword_mode=kw_mode,
         out_file=config_rsb.CRAWL_OUTPUT, verbose=True)
+    _excluded_keys("rsb", arts, after_crawl=True)
     return _crawl_summary(job, arts)
 
 
@@ -998,14 +1095,19 @@ def _crawl_summary(job: Job, arts: list) -> str:
 def _cluster_input(job: Job, cfg, mode: str) -> str:
     """Build the generation input for `mode`, returning the path to feed engine.
 
-    mode="off" feeds the crawl file untouched, so the un-clustered pipeline stays
-    byte-identical. Any other mode writes a sibling file of one synthetic article per
+    mode="off" writes the selected articles. Other modes write one article per
     cluster, whose body is the members' bodies concatenated under source headers.
     That is what makes one report cover one story instead of one article.
     """
+    arts = _selected_articles(job.pipeline)
+    if not arts:
+        raise ValueError("No articles selected for AI. Include at least one fetched article before step 2.")
+    job.log("%d article(s) selected for AI" % len(arts))
     if mode == "off":
-        return cfg.CRAWL_OUTPUT
-    arts = _read_json(cfg.CRAWL_OUTPUT) or []
+        path = cfg.CRAWL_OUTPUT.replace(".json", "_selected.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(arts, fh, indent=2, ensure_ascii=False)
+        return path
     groups = clustering.build_clusters(arts, mode=mode)
     # Same budget engine.generate_news truncates at, so every source in a cluster
     # actually reaches the model rather than just the first one or two.
@@ -1033,6 +1135,8 @@ def _cluster_input(job: Job, cfg, mode: str) -> str:
 
 def _step_generate(job: Job, p: dict, name: str) -> str:
     cfg = PIPELINES[name]["cfg"]
+    if not _selected_articles(name):
+        raise ValueError("No articles selected for AI. Include at least one fetched article before step 2.")
     key = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
     if not config_env.apply_to_engine(engine):
         raise RuntimeError(
@@ -1356,14 +1460,49 @@ def _unknown_pipeline(name):
 def run(pipeline, step):
     if (pipeline, step) not in STEPS:
         return jsonify(error="unknown stage %s/%s" % (pipeline, step)), 404
-    if CURRENT is not None:
-        # `web-crawl-001` means nothing to a reader; name the step instead.
-        return jsonify(error="“%s” is still running on the %s pipeline. Wait for "
-                             "it to finish — only one step runs at a time."
-                             % (STEP_META[CURRENT.step]["label"],
-                                PIPELINES[CURRENT.pipeline]["title"])), 409
-    job = _run_async(pipeline, step, request.get_json(silent=True) or {})
+    with _SELECTION_LOCK:
+        if CURRENT is not None:
+            # `web-crawl-001` means nothing to a reader; name the step instead.
+            return jsonify(error="“%s” is still running on the %s pipeline. Wait for "
+                                 "it to finish — only one step runs at a time."
+                                 % (STEP_META[CURRENT.step]["label"],
+                                    PIPELINES[CURRENT.pipeline]["title"])), 409
+        if step == "generate" and not _selected_articles(pipeline):
+            return jsonify(error="No articles selected for AI. Include at least one fetched article before step 2."), 400
+        job = _run_async(pipeline, step, request.get_json(silent=True) or {})
     return jsonify(job_id=job.id)
+
+
+@app.route("/api/selection/<pipeline>", methods=["GET", "POST"])
+def api_selection(pipeline):
+    if pipeline not in PIPELINES:
+        return jsonify(error="unknown pipeline"), 404
+    with _SELECTION_LOCK:
+        if request.method == "POST" and CURRENT is not None:
+            return jsonify(error="Wait for the current run to finish before changing selection."), 409
+        arts = _read_json(_stage_path(pipeline, "crawl")) or []
+        excluded = _excluded_keys(pipeline, arts)
+        if request.method == "POST":
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                return jsonify(error="Expected a JSON object."), 400
+            action = payload.get("action")
+            keys = payload.get("keys", [])
+            if not isinstance(action, str) or action not in {"exclude", "include", "select_all", "clear_excluded"}:
+                return jsonify(error="unknown selection action"), 400
+            if not isinstance(keys, list) or any(not isinstance(k, str) for k in keys):
+                return jsonify(error="keys must be a list of article keys"), 400
+            valid = {_article_key(a) for a in arts}
+            if set(keys) - valid:
+                return jsonify(error="Articles changed. Reload the fetched articles and try again."), 400
+            if action == "exclude":
+                excluded.update(keys)
+            elif action == "include":
+                excluded.difference_update(keys)
+            else:
+                excluded.clear()
+            _write_selection(pipeline, excluded)
+        return jsonify(_selection_summary(arts, excluded))
 
 
 @app.get("/api/state")
@@ -1446,6 +1585,22 @@ def data(pipeline):
     if stage not in STAGES:
         return "unknown stage", 400
     rows = _rows(pipeline, stage)
+    selection = None
+    selection_view = request.args.get("selection", "all")
+    if selection_view not in {"all", "selected", "excluded"}:
+        return "unknown selection filter", 400
+    if stage == "crawl":
+        selection = {"selected": sum(not r["excluded"] for r in rows),
+                     "excluded": sum(r["excluded"] for r in rows)}
+        if selection_view != "all":
+            rows = [r for r in rows if r["excluded"] == (selection_view == "excluded")]
+    elif selection_view == "selected":
+        mode = request.args.get("mode", "story")
+        if mode not in clustering.MODES:
+            return "unknown mode", 400
+        arts = _selected_articles(pipeline)
+        titles = {_resume_key(c["title"]) for c in clustering.build_clusters(arts, mode=mode)}
+        rows = [r for r in rows if _resume_key(r["title"]) in titles and r["has_story"]]
     q = (request.args.get("q") or "").strip()
     if q:
         needle = q.lower()
@@ -1455,7 +1610,8 @@ def data(pipeline):
     return render_template(
         "data.html", nav="data", pipeline=pipeline, title=PIPELINES[pipeline]["title"],
         stage=stage, stage_label=STAGE_LABEL[stage], stages=_available_stages(pipeline),
-        rows=rows, q=q, file=os.path.relpath(_stage_path(pipeline, stage), _PROJECT_ROOT),
+        rows=rows, q=q, selection=selection, selection_view=selection_view,
+        file=os.path.relpath(_stage_path(pipeline, stage), _PROJECT_ROOT),
         total=len(_read_json(_stage_path(pipeline, stage)) or []))
 
 
@@ -1568,14 +1724,17 @@ def clusters(pipeline):
     mode = request.args.get("mode", "story")
     if mode not in clustering.MODES:
         return "unknown mode", 400
-    arts = _read_json(_stage_path(pipeline, "crawl")) or []
+    all_arts = _read_json(_stage_path(pipeline, "crawl")) or []
+    excluded = _excluded_keys(pipeline, all_arts)
+    indices = [i for i, a in enumerate(all_arts) if _article_key(a) not in excluded]
+    arts = [all_arts[i] for i in indices]
     groups = clustering.build_clusters(arts, mode=mode) if arts else []
     rows = []
     for c in groups:
         rows.append({
             "size": c["size"], "chars": c["chars"], "topics": c["topics"],
-            "sources": c["sources"], "lead": c["lead"],
-            "members": [{"i": i, "source": _short_source(arts[i].get("source") or ""),
+            "sources": c["sources"], "lead": indices[c["lead"]],
+            "members": [{"i": indices[i], "source": _short_source(arts[i].get("source") or ""),
                          "title": arts[i].get("title") or "",
                          "date": arts[i].get("date") or "",
                          "chars": len(arts[i].get("body") or "")}
@@ -1635,6 +1794,8 @@ def verify(pipeline, index):
 
 if __name__ == "__main__":
     os.makedirs(LOG_DIR, exist_ok=True)
+    for name in _pipeline_names():
+        _clear_stale_outputs(name)
     k = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
     print("research UI  ->  http://127.0.0.1:5001")
     print("logs         ->  http://127.0.0.1:5001/logs   (files in %s)"

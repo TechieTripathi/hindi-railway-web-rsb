@@ -31,6 +31,7 @@
   <span style="flex:1"></span>
   <form method="get" action="/data/{{ pipeline }}" style="display:flex; gap:6px">
     <input type="hidden" name="stage" value="{{ stage }}">
+    {% if stage == 'crawl' %}<input type="hidden" name="selection" value="{{ selection_view }}">{% endif %}
     {# type=text is load-bearing: the base stylesheet targets input[type=text],
        which does NOT match an input with the attribute absent. Without it this
        box fell back to a hardcoded dark background and was unreadable in the
@@ -42,6 +43,28 @@
                  style="align-self:center; font-size:12.5px">clear</a>{% endif %}
   </form>
 </div>
+
+{% if stage == 'crawl' %}
+<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 0; border-block:1px solid var(--line); margin-bottom:14px">
+  <strong class="small">{{ selection.selected }} selected for AI · {{ selection.excluded }} excluded</strong>
+  <span class="switcher" aria-label="Article selection filter">
+    {% for value, label in [('all', 'All'), ('selected', 'Selected only'), ('excluded', 'Excluded only')] %}
+    <a class="chip" href="{{ url_for('data', pipeline=pipeline, stage=stage, selection=value, q=q) }}"
+       {% if selection_view == value %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </span>
+  <span style="flex:1"></span>
+  <button type="button" class="btn btn-sm" data-selection-action="exclude" disabled>Exclude selected</button>
+  <button type="button" class="btn btn-sm" data-selection-action="include" disabled>Include selected</button>
+  <a class="small" href="/panel/{{ pipeline }}">AI run →</a>
+</div>
+<p id="selection-error" class="err small" role="alert" hidden></p>
+<style>
+  .browse tr.article-excluded { background:var(--panel2); }
+  .browse tr.article-excluded .article-title { color:var(--dim); }
+  .article-pick, #select-visible { width:18px; height:18px; cursor:pointer; }
+</style>
+{% endif %}
 
 {% for s in stages if s.key == stage %}
 <p class="small" style="margin:0 0 10px; display:flex; gap:8px; align-items:baseline">
@@ -91,7 +114,9 @@
 {% if not rows %}
   <div class="panel" style="padding:18px">
     <p class="dim" style="margin:0">
-      {% if q %}No article matches “{{ q }}”.
+      {% if stage == 'crawl' and total and selection_view != 'all' %}No articles in this view.
+        <a href="/data/{{ pipeline }}?stage=crawl">Show all articles</a>.
+      {% elif q %}No article matches “{{ q }}”.
         <a href="/data/{{ pipeline }}?stage={{ stage }}">Clear the filter</a>.
       {% else %}<strong>Nothing here yet.</strong>
         The <em>{{ stage_label }}</em> stage has not been run, so there is
@@ -112,6 +137,10 @@
        table-layout:auto">
   <thead>
     <tr style="text-align:left; color:var(--dim); border-bottom:1px solid var(--line)">
+      {% if stage == 'crawl' %}
+      <th style="padding:9px 10px; width:1%"><input id="select-visible" type="checkbox"
+        aria-label="Select all visible articles" title="Select all visible articles"></th>
+      {% endif %}
       <th style="padding:9px 10px; width:1%">#</th>
       <th style="padding:9px 10px; width:1%; white-space:nowrap"
           title="Publisher or railway zone, when it was published, and the listing page it was found on">source</th>
@@ -125,7 +154,11 @@
   </thead>
   <tbody>
   {% for r in rows %}
-    <tr style="border-bottom:1px solid var(--line); vertical-align:top">
+    <tr class="{{ 'article-excluded' if r.excluded }}" style="border-bottom:1px solid var(--line); vertical-align:top">
+      {% if stage == 'crawl' %}
+      <td style="padding:9px 10px"><input type="checkbox" class="article-pick" value="{{ r.article_key }}"
+        aria-label="Select {{ r.title }}" title="Select article"></td>
+      {% endif %}
       <td style="padding:9px 10px" class="dim">{{ r.i }}</td>
 
       {# WHERE: publisher, date, and the listing page, stacked. #}
@@ -144,7 +177,8 @@
       {# WHAT: title, the shortened body, then the extraction facts as one line.
          This is the only column without a fixed width, so it absorbs the slack. #}
       <td style="padding:9px 10px">
-        <div style="font-weight:550; line-height:1.4">{{ r.title }}</div>
+        <div class="article-title" style="font-weight:550; line-height:1.4">{{ r.title }}</div>
+        {% if stage == 'crawl' %}<span class="tiny {{ 'warn' if r.excluded else 'ok' }}">{{ 'Excluded from AI' if r.excluded else 'Selected for AI' }}</span>{% endif %}
         <div class="dim" style="margin-top:2px">{{ r.snippet }}</div>
         <div class="tiny" style="margin-top:4px; display:flex; gap:10px; flex-wrap:wrap">
           <span class="{{ 'warn' if r.short else 'faint' }}"
@@ -208,5 +242,54 @@
   is a best guess. Crawls run after this UI was added record the exact
   <code>listing_url</code>.
 </p>
+{% endif %}
+{% if stage == 'crawl' %}
+<script>
+(() => {
+  const picks = Array.from(document.querySelectorAll('.article-pick'));
+  const all = document.getElementById('select-visible');
+  const actions = Array.from(document.querySelectorAll('[data-selection-action]'));
+  const error = document.getElementById('selection-error');
+  let saving = false;
+  function refresh() {
+    const count = picks.filter(p => p.checked).length;
+    if (all) {
+      all.checked = picks.length > 0 && count === picks.length;
+      all.indeterminate = count > 0 && count < picks.length;
+      all.disabled = saving;
+    }
+    picks.forEach(p => { p.disabled = saving; });
+    actions.forEach(b => {
+      b.disabled = saving || count === 0;
+    });
+  }
+  picks.forEach(p => p.addEventListener('change', refresh));
+  if (all) all.addEventListener('change', () => {
+    picks.forEach(p => { p.checked = all.checked; });
+    refresh();
+  });
+  actions.forEach(button => button.addEventListener('click', async () => {
+    saving = true;
+    error.hidden = true;
+    refresh();
+    try {
+      const response = await fetch({{ url_for('api_selection', pipeline=pipeline)|tojson }}, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: button.dataset.selectionAction,
+          keys: picks.filter(p => p.checked).map(p => p.value)})
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save article selection.');
+      window.location.reload();
+    } catch (e) {
+      error.textContent = e.message;
+      error.hidden = false;
+      saving = false;
+      refresh();
+    }
+  }));
+  refresh();
+})();
+</script>
 {% endif %}
 {% endblock %}
