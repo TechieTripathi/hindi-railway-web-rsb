@@ -1,37 +1,35 @@
-# Research-only dependencies. The webapp's root requirements.txt is untouched.
+# Everything research/ needs. It is a standalone repo: nothing is installed from,
+# or imported from, the webapp.
 #
 # Install:
-#   .venv/bin/python3 -m pip install -r research/requirements-research.txt
+#   .venv/bin/python3 -m pip install -r requirements-research.txt
 #
 # Use `python3 -m pip`, not `.venv/bin/pip3` — the venv's console scripts carry a
 # stale shebang from a drive remount and will not execute.
 #
-# This list is deliberately complete and standalone: research/ must install without
-# the root requirements.txt.
+# The version in each comment is the one this checkout is verified with (Python 3.13.12).
 
 # --- crawling -------------------------------------------------------------
-requests>=2.20
-beautifulsoup4>=4.9
-lxml>=4.6                 # BeautifulSoup's "xml" parser, used for RSS listings
+# Every BeautifulSoup call uses the stdlib "html.parser", so no lxml is needed.
+requests>=2.20            # 2.34.2
+beautifulsoup4>=4.9       # 4.15.0
 
 # --- Devanagari normalisation --------------------------------------------
 # Unifies precomposed vs combining nukta (हावड़ा appears both ways in one corpus) and
 # strips ZWJ. Plain regex cannot do this. Falls back to unicodedata NFC if absent,
 # which handles the nukta but not the ZWJ.
-indic-nlp-library>=0.92
+indic-nlp-library>=0.92   # 0.92
 
-# --- pulled in transitively, listed so this file stands alone -------------
-httpx>=0.23               # engine.generate_news -> Anthropic API
-python-dotenv>=1.0        # config.py loads ANTHROPIC_API_KEY from .env
+# --- AI generation (vendor/engine.py) ------------------------------------
+httpx>=0.23               # 0.28.1   engine.generate_news -> Anthropic API
+
+# --- research control panel (ui.py) --------------------------------------
+flask>=2.0                # 3.1.3
 
 # --- notebooks ------------------------------------------------------------
-# `jupyter` is a metapackage; installing it does NOT give you a frontend on its own if
-# a partial install left only jupyter-core behind. `jupyter lab` needs jupyterlab.
-# VS Code needs neither -- it drives the kernel through ipykernel.
+# VS Code needs only ipykernel -- it drives the kernel itself. `jupyter lab` in a
+# browser needs jupyterlab; the `jupyter` metapackage alone does not give you a
+# frontend if a partial install left only jupyter-core behind.
+ipykernel>=6.0            # 7.3.0
 jupyter>=1.0
 jupyterlab>=4.0
-ipykernel>=6.0
-
-# --- research control panel (research/ui.py) -----------------------------
-# The webapp already depends on flask, but research/ must install standalone.
-flask>=2.0

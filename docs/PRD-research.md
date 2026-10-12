@@ -4,7 +4,7 @@
 **Relationship to [PRD.md](PRD.md):** that document covers the Flask webapp and remains
 valid for it. This one covers `research/`, which exists because the webapp does not work
 for Hindi. Everything measured below is from the current corpus (31 articles, 22 web + 9
-RSB) and is reproducible with `research/shared/score_report.py`.
+RSB) and is reproducible with `shared/score_report.py`.
 
 ---
 
@@ -15,8 +15,9 @@ any good. It crawls Hindi publishers and the Hindi edition of the official zone 
 generates bilingual stories, and scores them against their sources with checks that do not
 rely on the model grading itself.
 
-It ships as a separate package, imported read-only by nothing in the webapp. Where webapp
-behaviour must change for a research run it is rebound at runtime
+It ships as a standalone repository; nothing in the webapp imports it, and it imports
+nothing from the webapp — the webapp code it builds on is vendored under `vendor/`. Where
+that behaviour must change for a research run it is rebound at runtime
 (`shared/hindi_patches.py`), never edited on disk.
 
 ---
@@ -182,8 +183,8 @@ impact agreement **12/31 (39%)**; two `score_report.py` runs byte-identical.
 
 ### 6.7 Reproducibility
 
-- **FR-30** The system shall write only under `research/output/`; project-root files are
-  never modified.
+- **FR-30** The system shall write only under `research/output/`; the webapp's data files
+  are never modified.
 - **FR-31** The system shall record, per run, the config that produced it and a hash of the
   research source, so a metric change can be attributed to a config change or a code change.
 
@@ -198,9 +199,9 @@ impact agreement **12/31 (39%)**; two `score_report.py` runs byte-identical.
   `indic-nlp-library` is absent, and reports which backend is active.
 - **NFR-4** Missing, empty and malformed JSON are treated alike; an interrupted run leaving
   a 0-byte file must not raise.
-- **NFR-5** Secrets are never committed. `research/` is a nested repository and therefore
-  does **not** inherit the parent's `.gitignore`; its own must list `.env`.
-- **NFR-6** The package installs standalone from `requirements-research.txt`.
+- **NFR-5** Secrets are never committed. `.gitignore` must list `.env`.
+- **NFR-6** The package installs and runs standalone from `requirements-research.txt`, with
+  no webapp checkout alongside it.
 
 ---
 
@@ -246,9 +247,9 @@ over ट्रेन / ट्रेनें / ट्रेनों still fails
 | Per-domain selectors break on a publisher redesign | **Silent** — short bodies, not an error | `extractor` recorded per article; `generic` and <300-char bodies flagged on every crawl |
 | No ground truth | Validation is by proxy — discrimination, negative control, determinism. Shows the metrics *behave* better; does not prove them *correct* | A human-labelled gold set is the only fix |
 | `coverage_score` confounded by source shape | A timetable with 200+ numerals yields low coverage for a correct summary | Published with `source_numbers`; deliberately not folded into a single score |
-| `crawler.py:43` fetches with `verify=False` | TLS verification disabled for every zone request, warning suppressed; silently accepts any certificate | **Open.** Inherited by `rsb_search/` via `crawler._fetch` |
-| `research/` is a nested repo | It does not inherit the parent `.gitignore`; an `.env` with live keys reached a local commit once | `.env` is now the first entry in `research/.gitignore`; documented in [SETUP.md](SETUP.md) |
-| `fact_score` repaired by keyword matching | A score of exactly 70/50/30/15 may be a substring match on the model's own prose (`engine.py:409-417`), not a judgement | Documented in [METRICS.md](METRICS.md); `grounding_ceiling` is independent of it |
+| `vendor/crawler.py:24` fetches with `verify=False` | TLS verification disabled for every zone request, warning suppressed; silently accepts any certificate | **Open.** Inherited by `rsb_search/` via `vendor/crawler._fetch` |
+| `.env` committed by mistake | An `.env` with live keys reached a local commit once, while this repo was nested inside the webapp and its `.gitignore` was assumed to apply | `.env` is now the first entry in `.gitignore`; documented in [SETUP.md](SETUP.md) |
+| `fact_score` repaired by keyword matching | A score of exactly 70/50/30/15 may be a substring match on the model's own prose (`vendor/engine.py:427-435`), not a judgement | Documented in [METRICS.md](METRICS.md); `grounding_ceiling` is independent of it |
 
 ---
 

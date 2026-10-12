@@ -1,13 +1,12 @@
-"""research/shared/hindi_patches.py — bind Devanagari-aware preprocessing onto the webapp.
+"""research/shared/hindi_patches.py — bind Devanagari-aware preprocessing onto the webapp code.
 
-Research-only. Rebinds module attributes at runtime; no webapp file is edited on disk.
-This is the same technique research/notebooks/web_news_pipeline_research.ipynb already uses for
-`web_agent.WEB_CRAWL_OUTPUT`, `web_agent.load_web_settings`, etc.
+Research-only. Rebinds attributes on the vendored webapp modules (`vendor/dedup.py`,
+`vendor/web_agent.py`) at runtime; the files themselves stay verbatim, so
+verify_patches() can still measure the webapp's Latin-only behaviour against the fix.
 
-Verified (see verify_patches) that the rebinds reach internal callers: both
-`_group_similar_articles` and `_dedup_by_source_overlap` look `_title_words` up as a
-module global, and `dedup._make_key` looks up `_normalise` the same way, so
-`deduplicate_articles` picks up the fix even though crawler.py imported it by reference.
+Verified (see verify_patches) that the rebinds reach internal callers:
+`_group_similar_articles` looks `_title_words` up as a module global, and
+`dedup._make_key` looks up `_normalise` the same way.
 """
 
 import hashlib
@@ -16,13 +15,11 @@ import sys
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
-for _p in (_PROJECT_ROOT, _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
-import dedup            # noqa: E402
-import web_agent        # noqa: E402
+from vendor import dedup            # noqa: E402
+from vendor import web_agent        # noqa: E402
 
 from shared import hindi_text   # noqa: E402
 

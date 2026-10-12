@@ -4,7 +4,7 @@ The point is to make trying something cheap and non-destructive: every run lands
 `research/output/runs/<run_id>/` with the config that produced it recorded alongside,
 so two runs can be compared without either clobbering the other.
 
-    from research import experiment as ex
+    import experiment as ex
 
     ex.run("baseline")                          # current config
     ex.run("wider", max_per_source=8)           # override any web_search.config setting
@@ -24,9 +24,8 @@ import sys
 from contextlib import contextmanager
 
 _RESEARCH_DIR = os.path.dirname(os.path.abspath(__file__))
-for _p in (os.path.dirname(_RESEARCH_DIR), _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
 from rsb_search import config as config_rsb        # noqa: E402
 from shared import grounding                       # noqa: E402

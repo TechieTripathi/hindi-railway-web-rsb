@@ -3,7 +3,7 @@
 Every command below was run against this checkout. Where a command prints something
 worth checking, the real output is shown.
 
-Run everything from the **repository root**.
+Run everything from the **repository root** — the folder holding `ui.py`.
 
 ---
 
@@ -11,9 +11,9 @@ Run everything from the **repository root**.
 
 | | |
 |---|---|
-| Python | **3.13.12** is what this checkout is verified on. `research/` uses `from __future__ import annotations`, so 3.9+ should work — untested. (The root README's "Python 3.6+" is stale.) |
+| Python | **3.13.12** is what this checkout is verified on. The code uses `from __future__ import annotations`, so 3.9+ should work — untested. |
 | git | any recent version |
-| API keys | Anthropic (required for story generation) · Brave (only for the webapp's search path) |
+| API keys | Anthropic (required for story generation). Brave is optional and unused by both pipelines. |
 
 ```bash
 python3 -V          # -> Python 3.13.12
@@ -21,31 +21,20 @@ python3 -V          # -> Python 3.13.12
 
 ---
 
-## 1. Get the code — **two repositories**
+## 1. Get the code
 
-The research package and the webapp live in separate repos, and **this one does not run on
-its own**: `shared/hindi_patches.py` imports `dedup` and `web_agent`, `ui.py` imports
-`engine`, and `rsb_search/pipeline.py` imports `crawler` — all of which are the webapp's.
-Clone the webapp first, then this repo *inside* it as `research/`:
+This repo is self-contained: clone it anywhere, under any directory name.
 
 ```bash
-git clone https://github.com/aimonitors25/railway-agent.git
-cd railway-agent
 git clone https://github.com/TechieTripathi/hindi-railway-web-rsb.git research
+cd research
 ```
 
-| repo | holds | remote |
-|---|---|---|
-| `railway-agent` | the Flask webapp — `app.py`, `config.py`, `engine.py`, `crawler.py`, `dedup.py`, `web_agent.py`, `templates/` | `aimonitors25/railway-agent` |
-| `railway-agent/research` | this package — the two pipelines, the shared metrics, the control panel, all docs | `TechieTripathi/hindi-railway-web-rsb` |
-
-The directory **must be named `research`**: the root README and every command below assume
-it, and `shared/provenance.py` records `git status -- research` for run provenance.
-
-> Because `research/` is a nested repository, **it does not inherit the parent's
-> `.gitignore`.** Anything that must never be committed has to be listed in
-> `research/.gitignore` — which is why `.env` is the first entry there. An `.env` holding
-> live API keys reached a local commit once because it was not.
+It started inside the Flask webapp (`aimonitors25/railway-agent`) and imported that
+webapp's `engine`, `crawler`, `dedup` and `web_agent` modules. Those are now copied into
+[`vendor/`](../vendor/__init__.py), so nothing outside this folder is needed. The copies
+**no longer track the webapp** — a prompt change in the webapp's `engine.py` or a parser fix
+in its `crawler.py` has to be copied into `vendor/` by hand to reach research runs.
 
 ---
 
@@ -54,8 +43,7 @@ it, and `shared/provenance.py` records `git status -- research` for run provenan
 ```bash
 python3 -m venv .venv
 .venv/bin/python3 -m pip install --upgrade pip
-.venv/bin/python3 -m pip install -r requirements.txt                    # the webapp
-.venv/bin/python3 -m pip install -r research/requirements-research.txt  # research/ + its UI
+.venv/bin/python3 -m pip install -r requirements-research.txt
 ```
 
 > **Use `.venv/bin/python3 -m pip`, never `.venv/bin/pip3`.** A venv's console scripts
@@ -71,104 +59,92 @@ python3 -m venv .venv
 > `python3 -m pip` has no such problem. The same applies to `jupyter`, `flask` and
 > `pytest` — always invoke them as `.venv/bin/python3 -m <tool>`.
 
-Both requirement files resolve cleanly in a fresh venv; `research/requirements-research.txt`
-is deliberately standalone, so `research/` installs without the root file.
-
 There is no need to `source .venv/bin/activate`. Calling `.venv/bin/python3` directly is
 equivalent and cannot be forgotten halfway through a session.
 
 ---
 
-## 3. Add your API keys
+## 3. Add your API key
 
 ```bash
 cp .env.example .env
-$EDITOR .env            # fill in ANTHROPIC_API_KEY and BRAVE_API_KEY
+$EDITOR .env            # fill in ANTHROPIC_API_KEY
 ```
 
-`config.py` calls `load_dotenv()` on this file at import time, so **every** entry point
-picks the keys up — `app.py`, `engine.py`, `research/ui.py` and the notebooks alike. You do
-not need to export anything.
+[`shared/config_env.py`](../shared/config_env.py) reads `.env` and binds the key onto the
+generation engine before every AI run — from `ui.py` and the notebooks alike. You do not
+need to export anything, and `python-dotenv` is not required. Check which key is in play:
 
-`.env` is gitignored. Verify it before your first commit:
+```bash
+.venv/bin/python3 shared/config_env.py
+# ANTHROPIC_API_KEY  set, 108 chars  (.env)
+# BRAVE_API_KEY      set, 31 chars  (.env)
+```
+
+Precedence, highest first: a shell `export` → `.env`.
+
+`.env` is the first entry in `.gitignore`. An `.env` holding live API keys reached a local
+commit once, back when this repo was nested inside the webapp and people assumed the
+webapp's `.gitignore` covered it. Verify before your first commit:
 
 ```bash
 git check-ignore -v .env
-# -> .gitignore:22:.env	.env
+# -> .gitignore:<line>:.env	.env      (any output means it is ignored)
 ```
-
-**Optional — a separate key for research runs.** `research/.env` overrides the root `.env`
-for research code only, so experiments can run on a different (or rate-limited) key without
-touching the webapp. Leave its values empty and the root key is used. See
-`research/shared/config_env.py`. Check which key is actually in play:
-
-```bash
-.venv/bin/python3 research/shared/config_env.py
-# ANTHROPIC_API_KEY  set, 108 chars  (research/.env)
-# BRAVE_API_KEY      set, 31 chars   (research/.env)
-```
-
-Precedence, highest first: a shell `export` → `research/.env` → the root `.env`.
 
 ---
 
 ## 4. Check the install — no network, no API spend
 
 ```bash
-.venv/bin/python3 research/test_hindi_text.py
-# -> 10 passed, 0 failed
+.venv/bin/python3 test_hindi_text.py
+# -> 10 passed, 0 failed      (on a fresh clone; see the note below)
 
-.venv/bin/python3 research/shared/hindi_patches.py
+.venv/bin/python3 -m unittest test_article_selection
+# -> Ran 14 tests ... OK
+
+.venv/bin/python3 shared/hindi_patches.py
 # Backend: indic-nlp-library
 #   distinct dedup keys      2 -> 5   (of 5 titles)
 #   titles with <3 words     5 -> 0
 #   grouping similar_count   2
 #   nukta variants hash equal True
-
-.venv/bin/python3 -c "import app; print('webapp imports OK')"
 ```
 
 `Backend: indic-nlp-library` is the line to look for. If it says
 `unicodedata-NFC (fallback)`, `indic-nlp-library` did not install — Devanagari still
 normalises, but zero-width joiners survive and some dedup keys will differ.
 
-If a corpus already exists under `research/output/`, this also works offline and is
-repeatable:
+> `test_real_corpus_gate` only runs when `output/web_agency_output_research.json` exists,
+> and it expects article 0 of that file to be a specific PIB sports release. After a
+> re-crawl it fails on the new corpus rather than on the code.
+
+If a corpus already exists under `output/`, this also works offline and is repeatable:
 
 ```bash
-.venv/bin/python3 research/shared/score_report.py
+.venv/bin/python3 shared/score_report.py
 ```
 
 ---
 
-## 5. Run the webapp
+## 5. Run the research control panel
 
 ```bash
-.venv/bin/python3 app.py
-```
-
-→ **http://127.0.0.1:5000**
-
----
-
-## 6. Run the research control panel
-
-```bash
-.venv/bin/python3 research/ui.py
+.venv/bin/python3 ui.py
 ```
 
 → **http://127.0.0.1:5001** · run history at `/logs` · articles at `/data/web`
 
-Different port, so it runs alongside `app.py`. It writes only under `research/output/` and
-never touches the project-root JSON files. Nothing runs until you click; only step 2
-("Write stories with AI") spends money.
+It writes only under `output/`. Nothing runs until you click; only step 2 ("Write stories
+with AI") spends money. Port 5001 was chosen so it can run alongside the webapp's `app.py`
+on 5000, if you also have that checked out.
 
 > `debug=False` is deliberate — Flask's reloader imports the module twice and would
 > double-apply the Devanagari patches. **Restart the process to pick up code changes.**
 
 ---
 
-## 7. Notebooks (optional)
+## 6. Notebooks (optional)
 
 In **VS Code**, just open a `.ipynb` and select `.venv` as the kernel — `ipykernel` is
 enough, no extra install.
@@ -181,22 +157,8 @@ leaves only `jupyter-core` and `jupyter lab` reports "command not found":
 .venv/bin/python3 -m jupyter lab
 ```
 
-All four `RUN_*` flags default to `False`, so opening a notebook fires no network or API
+All `RUN_*` flags default to `False`, so opening a notebook fires no network or API
 calls.
-
----
-
-## 8. Optional: the webapp's own test
-
-`pytest` is not in either requirements file and is not installed here:
-
-```bash
-.venv/bin/python3 -m pip install pytest
-.venv/bin/python3 -m pytest -q tests/
-```
-
-(The root README's pytest command hard-codes an absolute path from a different machine —
-use the line above instead.)
 
 ---
 
@@ -206,57 +168,42 @@ use the line above instead.)
 |---|---|
 | `bad interpreter: … No such file or directory` | A venv console script with a stale path. Use `.venv/bin/python3 -m <tool>`. |
 | `Address already in use` / `Port 5001 is in use` | An instance is already running. `ss -ltnp \| grep 5001` to find it. |
-| `ModuleNotFoundError: flask` (or `indicnlp`, `bs4`) | Requirements not installed into **this** venv. Re-run step 2 with the `.venv/bin/python3 -m pip` form. |
-| `ANTHROPIC_API_KEY is not set` | No key in the shell, `research/.env` or the root `.env`. Run `research/shared/config_env.py` to see which sources were checked. |
+| `ModuleNotFoundError: flask` (or `indicnlp`, `bs4`, `httpx`) | Requirements not installed into **this** venv. Re-run step 2 with the `.venv/bin/python3 -m pip` form. |
+| `ANTHROPIC_API_KEY is not set` | No key in the shell or `.env`. Run `shared/config_env.py` to see which sources were checked. |
 | `Backend: unicodedata-NFC (fallback)` | `indic-nlp-library` missing. `.venv/bin/python3 -m pip install indic-nlp-library`. |
-| `jupyter lab` → command not found | Metapackage without a frontend. Install `jupyterlab` (step 7). |
+| `jupyter lab` → command not found | Metapackage without a frontend. Install `jupyterlab` (step 6). |
 | UI code edits do nothing | `debug=False`; restart the process. |
-| `git add -A` → `research/ does not have a commit checked out` | A nested `research/.git` exists, so git treats `research/` as a submodule and refuses to index it. Either fold it into this repo (`rm -rf research/.git`) or commit inside it separately (`git -C research add -A && git -C research commit`). |
 | Crawl returned short bodies, no error | A publisher redesign. Check the `extractor` column in `/data/web` — `generic` means that site's selector has drifted. |
+| Research stories differ from the webapp's | `vendor/engine.py` is a snapshot; the webapp's prompt has moved on. Copy the change into `vendor/` if research should follow it. |
 
 ---
 
 ## Where things live
 
 ```
-railway-agent/                      <- repo 1: aimonitors25/railway-agent
-├── app.py config.py engine.py …      the webapp (flat, at the root)
-├── templates/                        its Flask templates
-├── tests/                            pytest suite, with fixtures/
-├── data/  logs/                      generated state — gitignored
-├── archive/                          superseded source, kept for reference
-└── research/                       <- repo 2: TechieTripathi/hindi-railway-web-rsb
-    ├── web_search/  rsb_search/      one folder per pipeline (config + pipeline)
-    ├── shared/                       Devanagari, webapp patches, grounded metrics
-    ├── notebooks/                    the four research notebooks
-    ├── ui.py  ui_templates/          control panel on :5001, drives both pipelines
-    ├── experiment.py                 run either pipeline with config overrides
-    ├── docs/                         all documentation (this file included)
-    └── output/                       scraped corpora, scores, logs — gitignored
+research/                       <- this repo: TechieTripathi/hindi-railway-web-rsb
+├── web_search/  rsb_search/      one folder per pipeline (config + pipeline)
+├── shared/                       Devanagari, patches, grounded metrics, key loading
+├── vendor/                       copies of the webapp's engine, CRIS parsers, normalizers
+├── notebooks/                    the four research notebooks
+├── ui.py  ui_templates/          control panel on :5001, drives both pipelines
+├── experiment.py                 run either pipeline with config overrides
+├── docs/                         all documentation (this file included)
+└── output/                       scraped corpora, scores, logs — gitignored
 ```
-
-Commands in this guide are still run from the **repo root** (`railway-agent/`), one level
-above `research/`.
-
-`config.py` defines **every** webapp file path (`DATA_DIR`, `LOG_DIR` and the constants
-built from them). Nothing else builds these paths, so relocating generated state is a
-one-file change.
 
 ---
 
 ## What is and is not committed
 
-Ignored (see `.gitignore`): `.venv/`, `__pycache__/`, `.ipynb_checkpoints/`, `*.log`,
-`data/`, `logs/`, and **`.env` at any depth** — the no-slash pattern covers
-`research/.env` too.
+Ignored (see `.gitignore`): `.env`, `.venv/`, `__pycache__/`, `.ipynb_checkpoints/`,
+`*.log`, and `output/` — which holds the scraped corpus, the AI output, the grounded
+scores, per-run logs and pre-crawl backups.
 
-`research/.gitignore` additionally ignores `research/output/`, which holds the scraped
-corpus, the AI output, the grounded scores, per-run logs and pre-crawl backups.
-
-> `research/output/` is the only copy of the crawled corpus and has been lost once. The
-> control panel copies the crawl file to `research/output/backups/` before each new crawl
-> (last 10 kept), but that directory is gitignored too — keep a backup elsewhere before
-> anything destructive.
+> `output/` is the only copy of the crawled corpus and has been lost once. The control
+> panel copies the crawl file to `output/backups/` before each new crawl (last 10 kept),
+> but that directory is gitignored too — keep a backup elsewhere before anything
+> destructive.
 
 **Never commit a key.** Before your first push:
 

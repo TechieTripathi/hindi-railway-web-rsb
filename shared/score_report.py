@@ -5,7 +5,7 @@ LLM-reported ones so old and new can be compared directly.
 
 Usage
 -----
-    .venv/bin/python3 research/shared/score_report.py
+    .venv/bin/python3 shared/score_report.py
 """
 
 import json
@@ -14,9 +14,8 @@ import sys
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _p in (os.path.dirname(_RESEARCH_DIR), _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
 from shared import grounding  # noqa: E402
 

@@ -10,7 +10,7 @@ Split of responsibility
     web_search/config.py                crawl behaviour           (patterns, selectors, limits)
     web_search/pipeline.py            the crawling logic itself
 
-Nothing here imports the webapp beyond its shared HTTP settings.
+Imports nothing from the webapp; the HTTP settings below are copies of its values.
 """
 
 import os

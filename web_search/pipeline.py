@@ -1,7 +1,8 @@
 """research/web_search/pipeline.py — direct crawler for the Hindi railway source set.
 
-Research-only and standalone: imports no webapp module at all, and nothing here writes
-to the project-root JSON files. HTTP settings come from `web_search/config.py`.
+Research-only and standalone: imports no webapp code (not even the vendored copies),
+and writes nothing outside `research/output/`. HTTP settings come from
+`web_search/config.py`.
 
 Why this exists
 ---------------
@@ -14,7 +15,7 @@ article body with per-domain selectors.
 
 Usage
 -----
-    from research.web_search import pipeline as hp
+    from web_search import pipeline as hp
     articles = hp.run_hindi_crawl(max_per_source=5)
 """
 
@@ -31,18 +32,12 @@ from bs4 import BeautifulSoup
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
-# Bootstrap order matters: _PROJECT_ROOT must precede this file's own directory on
-# sys.path. Run as a script, sys.path[0] is this package dir, which contains a
-# config.py — and the webapp's crawler.py/engine.py import `config` by bare name.
-# Inserting _PROJECT_ROOT at 0 keeps them pointing at the webapp's config.py.
-for _p in (_PROJECT_ROOT, _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
 from web_search import config as CFG      # noqa: E402
 
-# No webapp import: this module now owns its HTTP settings via config_web, so the
+# No webapp import: this module owns its HTTP settings via web_search/config.py, so the
 # web crawler is fully standalone.
 HEADERS = dict(CFG.HEADERS)
 TIMEOUT = CFG.TIMEOUT
@@ -435,7 +430,7 @@ def run_hindi_crawl(sources=None, max_per_source=None, relevance_filter=None,
     `keyword_mode` is "narrow" (railway AND keyword) or "only" (keyword alone).
     An empty list leaves the built-in railway relevance test as the sole filter.
 
-    Returns the list of article dicts. Never touches project-root files.
+    Returns the list of article dicts. Writes nothing outside research/output/.
     """
     sources = sources if sources is not None else load_sources()
     if source_names:

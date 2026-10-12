@@ -1,19 +1,21 @@
 # Research Notebooks & Modules
 
-Research code for the Railway Agent, kept deliberately separate from the Flask webapp —
-separate directory *and* separate repository (`TechieTripathi/hindi-railway-web-rsb`,
-cloned as `research/` inside `aimonitors25/railway-agent`). See [SETUP.md](SETUP.md).
+Research code for the Railway Agent, in its own standalone repository
+(`TechieTripathi/hindi-railway-web-rsb`), separate from the Flask webapp
+(`aimonitors25/railway-agent`) it grew out of. See [SETUP.md](SETUP.md).
 
-**Nothing here modifies the webapp.** `web_agent.py`, `dedup.py`, `engine.py`, `crawler.py`,
-`app.py` and `config.py` are imported read-only. Where webapp behaviour must change for a
-research run, it is rebound at runtime (see `shared/hindi_patches.py`) rather than edited on disk.
-All output goes to `research/output/`; the project-root JSON files are never touched.
+**Nothing here needs the webapp checked out.** The webapp code research builds on —
+`engine.py`, the CRIS parsers from `crawler.py`, and the Latin-only normalizers from
+`dedup.py` / `web_agent.py` — is copied into `vendor/` (see `vendor/__init__.py` for the
+snapshot it came from). Where that behaviour must change for a research run, it is rebound
+at runtime (see `shared/hindi_patches.py`) rather than edited, so `vendor/` stays a faithful
+baseline. All output goes to `research/output/`.
 
 Every metric the pipeline attaches to an article — formula, who computes it, and what it
 is evidence of — is documented in **[METRICS.md](METRICS.md)**.
 
 ```bash
-.venv/bin/python3 -m pip install -r research/requirements-research.txt
+.venv/bin/python3 -m pip install -r requirements-research.txt
 ```
 
 First time in this repo? See **[SETUP.md](SETUP.md)** for the whole sequence.
@@ -38,11 +40,16 @@ research/
 │   └── pipeline.py      the crawling logic
 ├── shared/              everything BOTH pipelines need
 │   ├── hindi_text.py    Devanagari normalising, tokenising, relevance
-│   ├── hindi_patches.py rebinds the webapp's Latin-only normalizers at runtime
+│   ├── hindi_patches.py rebinds vendor/'s Latin-only normalizers at runtime
 │   ├── grounding.py     deterministic, source-checked scores
 │   ├── score_report.py  applies grounding to an engine output file
 │   ├── config_env.py    where the ANTHROPIC_API_KEY comes from
 │   └── provenance.py    git hash / config snapshot for a run
+├── vendor/              snapshot of the webapp code research builds on
+│   ├── engine.py        AI generation (Claude), verbatim but for one import
+│   ├── crawler.py       CRIS listing/detail parsers
+│   ├── dedup.py, web_agent.py   the webapp's Latin-only normalizers — the baseline
+│   └── config.py        the settings those modules read
 ├── notebooks/           the four research notebooks
 ├── ui.py, ui_templates/ control panel driving BOTH pipelines, on :5001
 ├── experiment.py        run either pipeline with overrides, into a stamped run dir
@@ -59,16 +66,15 @@ research/
 directly as a script:
 
 ```bash
-.venv/bin/python3 research/shared/score_report.py
-.venv/bin/python3 research/shared/hindi_patches.py
-.venv/bin/python3 research/test_hindi_text.py
+.venv/bin/python3 shared/score_report.py
+.venv/bin/python3 shared/hindi_patches.py
+.venv/bin/python3 test_hindi_text.py
 ```
 
-> One trap worth knowing: `web_search/` and `rsb_search/` each contain a `config.py`,
-> and the webapp's `crawler.py` / `engine.py` import `config` by bare name. Run as a
-> script, a package directory is `sys.path[0]` — so each `pipeline.py` inserts
-> `_PROJECT_ROOT` at position 0 *ahead of it*, keeping the webapp pointed at its own
-> `config.py`. Verified, and commented in both files.
+> `web_search/`, `rsb_search/` and `vendor/` each contain a `config.py`. The vendored
+> modules import theirs package-relatively (`from .config import …`), so a bare
+> `import config` never has to be disambiguated by `sys.path` order — the trap that the
+> old two-repo layout had to work around.
 
 ---
 
@@ -205,9 +211,9 @@ single-tier version it replaced admitted a PIB *sports* release because `को�
 
 ### `shared/config_env.py` — where the API key comes from
 
-`config.py` already calls `load_dotenv()` on the project-root `.env`, so the webapp's key
-works in research runs with no extra setup. This module adds a **research-local override**
-in `research/.env`, so a run can use a different key without editing a webapp file.
+`vendor/config.py` reads `ANTHROPIC_API_KEY` from the process environment once, at
+import, and loads no `.env` file. This module supplies the key from `research/.env`
+(dependency-free — no `python-dotenv`) and binds it onto `engine` before a run.
 
 Precedence, highest first:
 
@@ -215,32 +221,28 @@ Precedence, highest first:
 |---|---|
 | 1 | a genuine shell export — `ANTHROPIC_API_KEY=… jupyter lab` |
 | 2 | `research/.env` |
-| 3 | the project-root `.env`, loaded by `config.py` |
 
 An empty value in `research/.env` changes nothing, so a placeholder-only file is safe.
+Nothing else writes these names into `os.environ`, so a value already there is a real
+export and wins.
 
-The one subtlety: `load_dotenv` **writes the root `.env` into `os.environ`**, so "is it in
-`os.environ`?" cannot tell a shell export apart from the root `.env` — and a naive
-"exported wins" rule makes `research/.env` dead code. This module therefore parses the
-root `.env` itself and treats only a *differing* env value as a real export.
-
-Keys are rebound as module globals on `engine` / `brave_search`, which works because both
-read them as globals *inside* the functions that use them (`engine.py:275,288`,
-`brave_search.py:24,237`). Same technique as `shared/hindi_patches.py`; no file is edited.
-Values are never printed — only the length and which source won.
+The key is rebound as a module global on `engine`, which works because `generate_news`
+reads it as a global *inside* the function. Same technique as `shared/hindi_patches.py`;
+no file is edited. Values are never printed — only the length and which source won.
 
 ```bash
-.venv/bin/python3 research/shared/config_env.py    # which keys are set, and from where
+.venv/bin/python3 shared/config_env.py    # which keys are set, and from where
 ```
 
 ```python
-import config_env, engine
+from shared import config_env
+from vendor import engine
 if not config_env.apply_to_engine(engine):
     print('Generation would return empty results.')
 ```
 
-> `research/.env` is gitignored by the root `.gitignore` (`.env` matches at any depth).
-> Verify with `git check-ignore -v research/.env` before committing anything.
+> `.env` is the first entry in this repo's own `.gitignore`. Verify with
+> `git check-ignore -v .env` before committing anything.
 
 ---
 
@@ -250,7 +252,7 @@ if not config_env.apply_to_engine(engine):
 `lang=1` is Hindi. Measured on Central Railway: `lang=0` gives 18 releases with 0 Hindi
 titles; `lang=1` gives the same 18 with 17 Hindi titles and ~100% Devanagari bodies.
 
-Reuses `crawler._parse_listing` / `_parse_detail` read-only, dedups within the run only,
+Reuses `crawler._parse_listing` / `_parse_detail` (vendored in `vendor/crawler.py`), dedups within the run only,
 and records `body_hindi_ratio` per article rather than trusting the zone's advertised
 language. Hindi coverage is very uneven — see
 `hindi_railway_sources.json → hindi_coverage_measured_2026_08_31`:
@@ -289,7 +291,7 @@ Matching is **token-boundary aware**, not substring — `मृत` (dead) must 
 अ**मृत** भारत, and `आग` (fire) must not fire inside `आगे`.
 
 ```bash
-.venv/bin/python3 research/shared/score_report.py
+.venv/bin/python3 shared/score_report.py
 ```
 
 Full formulas, gate thresholds and current measured values: **[METRICS.md](METRICS.md)**.
@@ -304,7 +306,7 @@ byte-identical.
 ## `ui.py` — click-through control panel
 
 ```bash
-.venv/bin/python3 research/ui.py        # http://127.0.0.1:5001
+.venv/bin/python3 ui.py                 # http://127.0.0.1:5001
 ```
 
 Port 5001, so it runs alongside the webapp's `app.py` on 5000. Two panels, one per
@@ -418,14 +420,15 @@ Flags default to `False` so opening a notebook never triggers network or API cal
 
 ```python
 RUN_DIRECT_CRAWL = False   # publisher tag pages (recommended)
-RUN_WEB_SEARCH   = False   # Google News + Brave — cannot resolve Hindi URLs
 RUN_CRAWL        = False   # RSB zone portals, Hindi edition
 RUN_AI           = False   # Claude generation
 HINDI_ONLY       = False   # RSB: keep only Devanagari-body articles
 ```
 
-Both pipeline notebooks apply `apply_hindi_patches()` before anything Hindi runs, and use
-a `load_json_file()` helper that treats missing, empty and malformed files alike — an
+The web notebook runs `verify_patches()` to prove the Devanagari patches reach the vendored
+grouping code. The webapp's Google News route (`RUN_WEB_SEARCH`) was dropped when research
+became standalone: Google's redirects resolved for none of the six Hindi sources. Both
+pipeline notebooks use a `load_json_file()` helper that treats missing, empty and malformed files alike — an
 interrupted `engine.run_generate` can leave a 0-byte output behind, and `json.loads("")`
 raises.
 
@@ -436,7 +439,7 @@ clean regeneration after changing the prompt.
 
 ## Output files
 
-Everything lands in `research/output/`, never the project root:
+Everything lands in `research/output/`:
 
 ```
 web_crawl_output_research.json      rsb_crawl_output_research.json      # Stage 1, scraped

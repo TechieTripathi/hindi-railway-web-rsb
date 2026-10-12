@@ -10,14 +10,14 @@ visible from a return value -- it is visible in the stage's stdout. So this UI r
 stage as a separate, explicit click and captures everything it printed.
 
 Run:
-    .venv/bin/python3 research/ui.py          # http://127.0.0.1:5001
+    .venv/bin/python3 ui.py                   # http://127.0.0.1:5001
 
 Port 5001, so it can run alongside the webapp's `app.py` on 5000.
 
 Safety properties, same as the notebooks
 ----------------------------------------
-* Reads/writes only `research/output/`. The project-root JSON files are never touched.
-* Applies `shared.hindi_patches` at startup, so Devanagari survives the webapp's normalizers.
+* Reads/writes only `research/output/`. The webapp's data files are never touched.
+* Applies `shared.hindi_patches` at startup, so Devanagari survives the vendored normalizers.
 * Nothing runs on page load. Crawl and Generate are POSTs, one click each.
 * AI Generate is the only stage that spends money; it is gated on a crawl existing and
   reports which key source it used (never the key).
@@ -37,14 +37,12 @@ import threading
 import traceback
 
 _RESEARCH_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
-for _p in (_PROJECT_ROOT, _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
 from flask import Flask, jsonify, render_template, request
 
-import engine                                        # the webapp, read-only
+from vendor import engine                            # the webapp's, vendored
 
 from rsb_search import config as config_rsb
 from rsb_search import pipeline as rsb_pipeline
@@ -57,7 +55,7 @@ from web_search import pipeline as web_pipeline
 
 LOG_DIR = os.path.join(config_web.OUTPUT_DIR, "logs")
 
-# The webapp's normalizers delete Devanagari; rebind before anything Hindi runs.
+# The vendored webapp normalizers delete Devanagari; rebind before anything Hindi runs.
 apply_hindi_patches()
 
 
@@ -371,7 +369,7 @@ def _backup(path: str, job: "Job | None") -> None:
     with open(path, "rb") as src, open(dest, "wb") as out:
         out.write(src.read())
     (job.log if job else print)("backed up %d article(s) -> %s"
-            % (len(_read_json(path) or []), os.path.relpath(dest, _PROJECT_ROOT)))
+            % (len(_read_json(path) or []), os.path.relpath(dest, _RESEARCH_DIR)))
 
     prefix = base[:-5] if base.endswith(".json") else base
     old = sorted(n for n in os.listdir(BACKUP_DIR) if n.startswith(prefix + "."))
@@ -1039,7 +1037,7 @@ def _step_web_crawl(job: Job, p: dict) -> str:
                "config default (%d)" % config_web.DAYS_BACK if days is None else days,
                "all 6" if not picked else "%d selected" % len(picked),
                "none" if not kw else "%s [%s]" % (", ".join(kw), kw_mode),
-               os.path.relpath(config_web.CRAWL_OUTPUT, _PROJECT_ROOT)))
+               os.path.relpath(config_web.CRAWL_OUTPUT, _RESEARCH_DIR)))
     _backup(config_web.CRAWL_OUTPUT, job)
     _clear_downstream(job, "web")
     arts = web_pipeline.run_hindi_crawl(
@@ -1060,7 +1058,7 @@ def _step_rsb_crawl(job: Job, p: dict) -> str:
             % ("uncapped" if n is None else n, hindi_only,
                "config default (%d)" % config_rsb.DAYS_BACK if days is None else days,
                ",".join(zones), "none" if not kw else "%s [%s]" % (", ".join(kw), kw_mode),
-               os.path.relpath(config_rsb.CRAWL_OUTPUT, _PROJECT_ROOT)))
+               os.path.relpath(config_rsb.CRAWL_OUTPUT, _RESEARCH_DIR)))
     _backup(config_rsb.CRAWL_OUTPUT, job)
     _clear_downstream(job, "rsb")
     arts = rsb_pipeline.run_rsb_crawl(
@@ -1140,9 +1138,9 @@ def _step_generate(job: Job, p: dict, name: str) -> str:
     key = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
     if not config_env.apply_to_engine(engine):
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not set — checked the shell environment, "
-            "research/.env and the project-root .env. Generation would return "
-            "empty results, so it was not started.")
+            "ANTHROPIC_API_KEY is not set — checked the shell environment and "
+            "research/.env. Generation would return empty results, so it was "
+            "not started.")
     job.log("key: %d chars from %s" % (key["length"], key["source"]))
     engine.STATUS_FILE = cfg.STATUS_FILE
 
@@ -1178,7 +1176,7 @@ def _step_score(job: Job, p: dict, name: str) -> str:
     cfg = PIPELINES[name]["cfg"]
     job.log("rescore_file(%s)" % os.path.basename(cfg.AGENCY_OUTPUT))
     scored, out = score_report.rescore_file(cfg.AGENCY_OUTPUT, cfg.SCORED_OUTPUT)
-    job.log("wrote %s" % os.path.relpath(out, _PROJECT_ROOT))
+    job.log("wrote %s" % os.path.relpath(out, _RESEARCH_DIR))
 
     fact = [a.get("fact_score") for a in scored if a.get("fact_score") is not None]
     cov = [a.get("coverage_score") for a in scored if a.get("coverage_score") is not None]
@@ -1611,7 +1609,7 @@ def data(pipeline):
         "data.html", nav="data", pipeline=pipeline, title=PIPELINES[pipeline]["title"],
         stage=stage, stage_label=STAGE_LABEL[stage], stages=_available_stages(pipeline),
         rows=rows, q=q, selection=selection, selection_view=selection_view,
-        file=os.path.relpath(_stage_path(pipeline, stage), _PROJECT_ROOT),
+        file=os.path.relpath(_stage_path(pipeline, stage), _RESEARCH_DIR),
         total=len(_read_json(_stage_path(pipeline, stage)) or []))
 
 
@@ -1638,7 +1636,7 @@ def data_detail(pipeline, index):
                   if art.get(k) and k not in _SOURCE_TEXT_KEYS],
         fields=[(k, v) for k, v in art.items()
                 if k not in long_keys and not isinstance(v, (dict,))],
-        file=os.path.relpath(_stage_path(pipeline, stage), _PROJECT_ROOT))
+        file=os.path.relpath(_stage_path(pipeline, stage), _RESEARCH_DIR))
 
 
 #: Deliberately minimal Markdown -> HTML, covering only what docs/SCORES.md uses:
@@ -1746,7 +1744,7 @@ def clusters(pipeline):
         title=PIPELINES[pipeline]["title"], mode=mode, modes=CLUSTER_MODES,
         rows=rows, counts=counts, total=len(arts),
         multi=sum(1 for r in rows if r["size"] > 1),
-        file=os.path.relpath(_stage_path(pipeline, "crawl"), _PROJECT_ROOT))
+        file=os.path.relpath(_stage_path(pipeline, "crawl"), _RESEARCH_DIR))
 
 
 @app.get("/verify/<pipeline>/<int:index>")
@@ -1789,7 +1787,7 @@ def verify(pipeline, index):
                  for k, src in enumerate(art.get("cluster_sources") or [])]
                 if (art.get("cluster_size") or 1) > 1 else [],
         has_ai=_has_story(art),
-        file=os.path.relpath(_stage_path(pipeline, stage), _PROJECT_ROOT))
+        file=os.path.relpath(_stage_path(pipeline, stage), _RESEARCH_DIR))
 
 
 if __name__ == "__main__":
@@ -1799,7 +1797,7 @@ if __name__ == "__main__":
     k = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
     print("research UI  ->  http://127.0.0.1:5001")
     print("logs         ->  http://127.0.0.1:5001/logs   (files in %s)"
-          % os.path.relpath(LOG_DIR, _PROJECT_ROOT))
+          % os.path.relpath(LOG_DIR, _RESEARCH_DIR))
     print("ANTHROPIC_API_KEY: %s (%s)"
           % ("set, %d chars" % k["length"] if k["set"] else "NOT set", k["source"]))
     # debug=False: the reloader would run this module twice and duplicate the patches.

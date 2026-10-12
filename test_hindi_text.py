@@ -1,6 +1,6 @@
 """research/test_hindi_text.py — regression tests for Hindi text handling.
 
-Run:  .venv/bin/python3 research/test_hindi_text.py     (or: pytest research/)
+Run:  .venv/bin/python3 test_hindi_text.py     (or: pytest)
 
 These exist because three bugs of the SAME class shipped in a row, each invisible in
 review because the wrong answer looked plausible:
@@ -16,9 +16,8 @@ import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (os.path.dirname(_HERE), _HERE):          # project root, then research/
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 from shared.hindi_text import (  # noqa: E402
     normalise_key, title_words, is_railway_relevant, light_stem, normalize_hi,
@@ -50,7 +49,7 @@ def test_hindi_titles_tokenise():
 
 def test_english_parity_preserved():
     """Pure-Latin titles must behave exactly as the webapp does, or hashes break."""
-    import web_agent
+    from vendor import web_agent
     for t in ["Indian Railways reforms boost cement movement",
               "Railways to run 2 new trains for Ahmedabad, Bengaluru routes"]:
         assert title_words(t) == web_agent._title_words(t), t

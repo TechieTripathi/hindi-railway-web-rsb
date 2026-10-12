@@ -1,37 +1,30 @@
-"""Load research-local secrets from `research/.env` and bind them onto the webapp.
+"""Load research secrets from `research/.env` and bind them onto the generation engine.
 
 Why this exists
 ---------------
-`config.py` already calls `load_dotenv()` on the project-root `.env`, and `engine.py`
-does `from config import ANTHROPIC_API_KEY` at import time. So the root `.env` alone is
-enough to make generation work. This module adds a *research-local* override so a run
-can use a different key (a scratch key, a rate-limited key, a key you can rotate without
-touching the webapp) without editing any webapp file.
+`vendor/config.py` reads `ANTHROPIC_API_KEY` from the process environment once, at
+import time, and loads no `.env` file. This module supplies the key from
+`research/.env` without anything having to be exported first.
 
 Precedence, highest first:
 
     1. a genuine shell export       (export ANTHROPIC_API_KEY=... ; jupyter ...)
     2. research/.env
-    3. the project-root .env, as loaded by config.py
 
-Note on (1) vs (3): `config.py` calls `load_dotenv()`, which *writes the root .env into
-`os.environ`*. So "is it in os.environ?" cannot by itself tell a shell export apart from
-the root .env -- and a naive "exported wins" rule would make research/.env dead code.
-This module therefore parses the root .env itself: a value in `os.environ` that matches
-the root .env is treated as coming from the root .env (overridable), and only a value
-that differs is treated as a genuine export (not overridden).
+Nothing else writes these names into `os.environ`, so a value already there when this
+module runs is a shell export, and it outranks the file.
 
-An empty or absent value in `research/.env` deliberately does NOT clobber a key that the
-root `.env` already provided -- so committing a placeholder-only `research/.env` is safe.
+An empty or absent value in `research/.env` deliberately does NOT clobber an exported
+key -- so committing a placeholder-only `research/.env` is safe.
 
-Nothing on disk is edited. Keys are rebound as module globals on `engine` /
-`brave_search`, which is safe because both modules read them as globals *inside* the
-functions that use them (`engine.py:275,288`, `brave_search.py:24,237`) rather than
-capturing them at call-site definition. Same technique as `hindi_patches.py`.
+Nothing on disk is edited. Keys are rebound as module globals on `engine`, which is
+safe because `generate_news` reads `ANTHROPIC_API_KEY` as a global *inside* the
+function rather than capturing it at definition. Same technique as `hindi_patches.py`.
 
 Usage
 -----
-    import config_env, engine
+    from shared import config_env
+    from vendor import engine
     if not config_env.apply_to_engine(engine):
         print('Generation would return empty results.')
 
@@ -51,9 +44,6 @@ KNOWN_KEYS = ("ANTHROPIC_API_KEY", "BRAVE_API_KEY")
 
 #: Set by load_env(): name -> human-readable source, for reporting only.
 _source: dict[str, str] = {}
-
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
-ROOT_ENV_PATH = os.path.join(_PROJECT_ROOT, ".env")
 
 
 def parse_env(text: str) -> dict[str, str]:
@@ -91,31 +81,29 @@ def _read_env_file(path: str) -> dict[str, str]:
 def load_env(path: str | None = None, override: bool = False) -> dict[str, str]:
     """Load `path` (default `research/.env`) into `os.environ`.
 
-    A non-empty value in this file overrides one that `config.py` loaded from the
-    project-root `.env`, but not a genuine shell export -- see the module docstring
-    for how the two are told apart. `override=True` overrides both. Empty values are
-    ignored, so a placeholder line never blanks out a key from elsewhere.
+    A value already in `os.environ` is a shell export and wins, unless
+    `override=True`. Empty values are ignored, so a placeholder line never blanks
+    out an exported key. Safe to call repeatedly.
     Returns the mapping of names this call actually set.
     """
     path = path or DEFAULT_ENV_PATH
     local = _read_env_file(path)
     if not local:
         return {}
-    root = _read_env_file(ROOT_ENV_PATH)
-    rel = os.path.relpath(path, _PROJECT_ROOT)
+    rel = os.path.relpath(path, _RESEARCH_DIR)
 
     applied: dict[str, str] = {}
     for name, value in local.items():
         if not value:
             continue
         current = os.environ.get(name)
+        if current == value:
+            # Already in place: set by an earlier call, or exported with the same value.
+            _source.setdefault(name, rel)
+            continue
         if current and not override:
-            # In os.environ but NOT equal to the root .env value -> a real shell
-            # export, which outranks this file. Equal (or root .env absent) -> it
-            # came from config.py's load_dotenv, so this file wins.
-            if name not in root or current != root[name]:
-                _source[name] = "shell export"
-                continue
+            _source[name] = "shell export"
+            continue
         os.environ[name] = value
         applied[name] = value
         _source[name] = rel
@@ -136,12 +124,9 @@ def _source_of(name: str, module_value: str) -> str:
     if name in _source:
         return _source[name]
     if os.environ.get(name):
-        root = _read_env_file(ROOT_ENV_PATH)
-        if root.get(name) == os.environ[name]:
-            return "project-root .env (via config.py)"
         return "shell export"
     if module_value:
-        return "webapp module default"
+        return "module default"
     return "nowhere"
 
 
@@ -164,7 +149,7 @@ def apply_to_module(module, names=KNOWN_KEYS, path=None, verbose=True) -> bool:
     """Rebind `names` as globals on `module` from the environment.
 
     Only names the module already defines are touched, and only when a non-empty
-    value is available -- a module global loaded by `config.py` is never blanked.
+    value is available -- a module global that is already set is never blanked.
     Returns True if every name the module defines ended up non-empty.
     """
     load_env(path)
@@ -181,8 +166,8 @@ def apply_to_module(module, names=KNOWN_KEYS, path=None, verbose=True) -> bool:
                 print("%s.%s <- %s (%d chars)"
                       % (label, name, _source_of(name, current), len(value)))
             else:
-                print("%s.%s is NOT set -- checked process env, research/.env, "
-                      "project-root .env" % (label, name))
+                print("%s.%s is NOT set -- checked the process environment and "
+                      "research/.env" % (label, name))
         if not value:
             ok = False
     return ok

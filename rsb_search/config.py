@@ -160,7 +160,7 @@ UNMEASURED_ZONES = []           # all 17 measured
 # ------------------------------------------------------------ detail pages
 
 # Content containers on CRIS detail pages, tried in order by crawler._parse_detail.
-# Listed here for reference — the parsing itself is reused from the webapp's crawler
+# Listed here for reference — the parsing itself is reused from vendor/crawler.py
 # rather than reimplemented, so this pipeline inherits its PDF and table handling.
 DETAIL_CONTAINERS = ["ViEtDeVdIvId", "texts", "view_detail"]
 
