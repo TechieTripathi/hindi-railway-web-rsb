@@ -195,15 +195,16 @@ RUN_AI      = True         # Stage 2
 Or from the shell:
 
 ```bash
-.venv/bin/python3 research/web_search/pipeline.py    # web crawl
-.venv/bin/python3 research/rsb_search/pipeline.py      # RSB crawl
-.venv/bin/python3 research/shared/score_report.py      # Stage 3 over both
-.venv/bin/python3 research/test_hindi_text.py   # regression tests
+.venv/bin/python3 web_search/pipeline.py      # web crawl
+.venv/bin/python3 rsb_search/pipeline.py      # RSB crawl
+.venv/bin/python3 shared/score_report.py      # Stage 3 over both
+.venv/bin/python3 test_hindi_text.py          # regression tests
 ```
 
-Both notebooks call `apply_hindi_patches()` before anything Hindi runs. Without it the
-webapp's own functions delete Devanagari during deduplication and collapse unrelated
-Hindi articles onto one key.
+`ui.py` and the RSB notebook call `apply_hindi_patches()` at startup, and the web notebook
+runs `verify_patches()`. Without the patches the webapp's own normalizers (vendored in
+`vendor/`) delete Devanagari during deduplication and collapse unrelated Hindi articles
+onto one key.
 
 ---
 
@@ -216,13 +217,14 @@ Hindi articles onto one key.
 | `web_search/pipeline.py` | Web crawler |
 | `rsb_search/pipeline.py` | RSB crawler |
 | `shared/hindi_text.py` | Devanagari-safe text handling (normalise, tokenise, stem, relevance) |
-| `shared/hindi_patches.py` | Binds the above onto the webapp at runtime |
+| `shared/hindi_patches.py` | Binds the above onto the vendored webapp code at runtime |
+| `vendor/` | Snapshot of the webapp code research builds on: `engine`, CRIS parsers, normalizers |
 | `shared/grounding.py` | Deterministic source-checked scores |
 | `shared/score_report.py` | Applies Stage 3 and prints the comparison table |
 | `test_hindi_text.py` | 10 regression tests |
 
-**Nothing here modifies the webapp.** Its modules are imported read-only; where behaviour
-must change, it is rebound at runtime.
+**Nothing here needs the webapp checked out.** Its code is vendored under `vendor/`; where
+behaviour must change, it is rebound at runtime rather than edited.
 
 ---
 

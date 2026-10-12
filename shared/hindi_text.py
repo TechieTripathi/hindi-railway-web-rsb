@@ -1,7 +1,7 @@
 """research/shared/hindi_text.py — Devanagari-aware text preprocessing.
 
 Research-only. Pure text utilities: no crawling, no I/O, no webapp imports.
-`research/shared/hindi_patches.py` is what binds these onto the webapp modules at runtime.
+`research/shared/hindi_patches.py` is what binds these onto the vendored webapp modules.
 
 Why this exists
 ---------------

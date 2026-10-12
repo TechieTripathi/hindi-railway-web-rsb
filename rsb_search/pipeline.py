@@ -1,8 +1,8 @@
 """research/rsb_search/pipeline.py — Hindi-first crawler for the official RSB zone portals.
 
-Research-only. Does NOT modify any webapp module: `crawler` is imported read-only for
-its proven listing/detail parsers, and nothing here writes to project-root JSON or to
-the persistent `seen_articles.json`.
+Research-only. Reuses the webapp's proven listing/detail parsers through the vendored
+`vendor/crawler.py`, and writes nothing outside `research/output/` — in particular no
+persistent `seen_articles.json`.
 
 Why this exists
 ---------------
@@ -22,7 +22,7 @@ rather than on the zone's advertised language.
 
 Usage
 -----
-    from research.rsb_search import pipeline as rp
+    from rsb_search import pipeline as rp
     articles = rp.run_rsb_crawl(zone_codes=['CR'], per_zone=3)
 """
 
@@ -38,20 +38,12 @@ import requests
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
-# Bootstrap order matters: _PROJECT_ROOT must precede this file's own directory on
-# sys.path. Run as a script, sys.path[0] is this package dir, which contains a
-# config.py — and the webapp's crawler.py/engine.py import `config` by bare name.
-# Inserting _PROJECT_ROOT at 0 keeps them pointing at the webapp's config.py.
-for _p in (_PROJECT_ROOT, _RESEARCH_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _RESEARCH_DIR not in sys.path:
+    sys.path.insert(0, _RESEARCH_DIR)
 
-# Read-only imports — we reuse the webapp's parsers, never mutate them.
-# The ONLY remaining webapp dependency, and a deliberate one: crawler's CRIS parsers
-# already handle the zone portals' table markup and PDF-attachment releases. Forking
-# them would mean maintaining two copies of that logic.
-import crawler                                    # noqa: E402
+# The webapp's CRIS parsers, vendored: they already handle the zone portals' table
+# markup and PDF-attachment releases. Reused, never mutated.
+from vendor import crawler                        # noqa: E402
 
 from rsb_search import config as CFG              # noqa: E402
 from shared import hindi_text                     # noqa: E402

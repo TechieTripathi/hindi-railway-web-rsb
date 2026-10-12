@@ -15,17 +15,16 @@ from datetime import datetime
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PROJECT_ROOT = os.path.dirname(_RESEARCH_DIR)
 
 
 def git_revision():
-    """Short SHA plus a dirty flag, or None outside a git checkout."""
+    """Short SHA of the research repo plus a dirty flag, or None outside a git checkout."""
     try:
         sha = subprocess.check_output(
-            ["git", "-C", _PROJECT_ROOT, "rev-parse", "--short", "HEAD"],
+            ["git", "-C", _RESEARCH_DIR, "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL, text=True).strip()
         dirty = subprocess.check_output(
-            ["git", "-C", _PROJECT_ROOT, "status", "--porcelain", "--", "research"],
+            ["git", "-C", _RESEARCH_DIR, "status", "--porcelain"],
             stderr=subprocess.DEVNULL, text=True).strip()
         return sha + ("-dirty" if dirty else "")
     except Exception:
@@ -54,7 +53,7 @@ def config_hash(module):
 
 
 #: Package directories walked by code_hash, relative to research/.
-_CODE_DIRS = ("", "shared", "web_search", "rsb_search")
+_CODE_DIRS = ("", "shared", "web_search", "rsb_search", "vendor")
 
 
 def code_hash(filenames=None):
@@ -62,8 +61,8 @@ def code_hash(filenames=None):
 
     Walks the subpackages as well as research/ itself. A flat `os.listdir` here would
     silently hash only ui.py / experiment.py once the pipelines moved into
-    web_search/, rsb_search/ and shared/ — and a changed crawler would produce an
-    unchanged `code_hash`, which is precisely the failure this field exists to catch.
+    web_search/, rsb_search/, shared/ and vendor/ — and a changed crawler would produce
+    an unchanged `code_hash`, which is precisely the failure this field exists to catch.
     """
     if filenames:
         names = list(filenames)

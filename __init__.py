@@ -1,8 +1,8 @@
 """Research package for the Railway Agent.
 
-Nothing here modifies the webapp: its modules are imported read-only, and where
-behaviour must change for a research run it is rebound at runtime
-(`shared/hindi_patches.py`).
+Standalone: the webapp code research builds on is vendored under `vendor/`, so this
+repo needs nothing from the folder above it. Where that code's behaviour must change
+for a research run it is rebound at runtime (`shared/hindi_patches.py`), never edited.
 
 Layout
 ------
@@ -10,6 +10,7 @@ Layout
     rsb_search/     official press releases, Hindi edition     (config, pipeline)
     shared/         everything both pipelines need — Devanagari handling, the
                     webapp patches, the grounded metrics, key resolution, provenance
+    vendor/         copies of the webapp's engine, CRIS parsers and normalizers
     ui.py           control panel driving BOTH pipelines, on :5001
     experiment.py   run either pipeline with config overrides, into a stamped run dir
     docs/           all documentation                          (start at docs/README.md)
@@ -23,7 +24,7 @@ Entry points
 
 Or click through the stages one at a time, with full captured output:
 
-    .venv/bin/python3 research/ui.py           # http://127.0.0.1:5001
+    .venv/bin/python3 ui.py                    # http://127.0.0.1:5001
 """
 
-__all__ = ["web_search", "rsb_search", "shared", "experiment"]
+__all__ = ["web_search", "rsb_search", "shared", "vendor", "experiment"]

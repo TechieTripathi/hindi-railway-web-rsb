@@ -7,8 +7,8 @@ Measured values throughout are from the current corpus — **31 articles** (22 w
 in `research/output/*_scored.json`, as of **2026-08-31**. Reproduce with:
 
 ```bash
-.venv/bin/python3 research/shared/score_report.py        # the discrimination table
-.venv/bin/python3 research/ui.py                  # per-article, in a browser
+.venv/bin/python3 shared/score_report.py        # the discrimination table
+.venv/bin/python3 ui.py                         # per-article, in a browser
 ```
 
 Metrics fall into four groups, and the distinction is the point of this document:
@@ -20,9 +20,10 @@ Metrics fall into four groups, and the distinction is the point of this document
 | [3. Webapp-computed](#3-webapp-computed) | `engine._compute_plagiarism` | yes, mechanically |
 | [4. Grounded](#4-grounded-research) | `research/shared/grounding.py` | yes, deterministically |
 
-> Links below of the form `../../engine.py` point at the **webapp** repo
-> (`aimonitors25/railway-agent`), which this package sits inside as `research/`. They
-> resolve in a full checkout; on GitHub's view of this repository alone they will not.
+> Links below into `engine.py` point at [`vendor/engine.py`](../vendor/engine.py), this
+> repo's copy of the webapp's generation engine. It is verbatim apart from its config
+> import, so the line numbers match the webapp's `engine.py` as of the snapshot noted in
+> `vendor/__init__.py`.
 
 ---
 
@@ -122,21 +123,21 @@ poisoning is permanent.
 
 `fact_score`, `impact_level`, `topics`, `themes`, `fact_details` and `impact_reason` all
 come from **the same Claude call that writes the story** (the system prompt at
-[engine.py:18-54](../../engine.py#L18-L54)). Nothing verifies them. Group 4 exists because of
+[engine.py:18-54](../vendor/engine.py#L18-L54)). Nothing verifies them. Group 4 exists because of
 this.
 
 ### `fact_score` (0–100)
 
-Asked for in the prompt with a rubric ([engine.py:38-43](../../engine.py#L38-L43)):
+Asked for in the prompt with a rubric ([engine.py:38-43](../vendor/engine.py#L38-L43)):
 `100` = all facts from source, `80-99` = most, `60-79` = core + context, `40-59` = partial,
 `20-39` = from headline only, `0-19` = no source body. Clamped to 0–100 at
-[engine.py:105](../../engine.py#L105); non-numeric becomes `0`.
+[engine.py:105](../vendor/engine.py#L105); non-numeric becomes `0`.
 
 **Two properties to know before using it:**
 
 1. **It barely discriminates.** 5 distinct values across 31 articles, median 92.
 2. **A zero is silently overwritten by keyword matching**, not by the model
-   ([engine.py:409-417](../../engine.py#L409-L417)). If `fact_score == 0` and a story exists:
+   ([engine.py:427-435](../vendor/engine.py#L427-L435)). If `fact_score == 0` and a story exists:
 
    ```
    'verified' / 'confirmed' / 'all major' in fact_details   -> 70
@@ -152,18 +153,18 @@ It also scored a misfiled PIB **sports** release **92**.
 
 ### `impact_level` (High / Medium / Low)
 
-Rubric is one line of the prompt ([engine.py:44](../../engine.py#L44)): High = safety /
+Rubric is one line of the prompt ([engine.py:44](../vendor/engine.py#L44)): High = safety /
 cancellations / policy / accidents; Medium = infrastructure / new services / tech;
 Low = routine / awards / HR.
 
 **`Low` is unreachable in practice**: anything not exactly `High|Medium|Low` is coerced to
-`Medium` at [engine.py:113](../../engine.py#L113). Measured: 21 Medium / 10 High / **0 Low**.
+`Medium` at [engine.py:113](../vendor/engine.py#L113). Measured: 21 Medium / 10 High / **0 Low**.
 
 ### `topics` (list)
 
 The prompt specifies a **closed vocabulary of 15** and asks for 2–4
-([engine.py:45-46](../../engine.py#L45-L46)). Nothing enforces either the vocabulary or the
-count — the only validation is "is it a list" ([engine.py:109](../../engine.py#L109)).
+([engine.py:45-46](../vendor/engine.py#L45-L46)). Nothing enforces either the vocabulary or the
+count — the only validation is "is it a list" ([engine.py:109](../vendor/engine.py#L109)).
 
 ### `themes`, `fact_details`, `impact_reason`
 
@@ -176,7 +177,7 @@ Free text. Not scores. `fact_details` is load-bearing anyway, because of the
 
 ### `plagiarism_score` (0–100, **lower is better**)
 
-[`engine._compute_plagiarism`](../../engine.py#L200) — the one metric in the product that is
+[`engine._compute_plagiarism`](../vendor/engine.py#L218) — the one metric in the product that is
 actually calculated. Word 4-gram overlap:
 
 ```
