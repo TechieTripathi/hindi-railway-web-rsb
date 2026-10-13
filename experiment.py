@@ -9,6 +9,7 @@ so two runs can be compared without either clobbering the other.
     ex.run("baseline")                          # current config
     ex.run("wider", max_per_source=8)           # override any web_search.config setting
     ex.run("rsb-hi", pipeline="rsb", hindi_only=True)
+    ex.run("vande", pipeline="search", keywords=["वंदे भारत"], days=3)
     ex.list_runs()
     ex.compare("baseline", "wider")
 
@@ -27,6 +28,7 @@ _RESEARCH_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RESEARCH_DIR not in sys.path:
     sys.path.insert(0, _RESEARCH_DIR)
 
+from keyword_search import config as config_search  # noqa: E402
 from rsb_search import config as config_rsb        # noqa: E402
 from shared import grounding                       # noqa: E402
 from shared import provenance as pv                # noqa: E402
@@ -37,6 +39,8 @@ RUNS_DIR = os.path.join(_RESEARCH_DIR, "output", "runs")
 _PIPELINES = {
     "web": {"config": config_web, "module": "web_search.pipeline", "entry": "run_hindi_crawl"},
     "rsb": {"config": config_rsb, "module": "rsb_search.pipeline", "entry": "run_rsb_crawl"},
+    "search": {"config": config_search, "module": "keyword_search.pipeline",
+               "entry": "run_keyword_search"},
 }
 
 

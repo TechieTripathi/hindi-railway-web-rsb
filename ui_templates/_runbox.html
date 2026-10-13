@@ -1,0 +1,19 @@
+{#- Progress for a job started from this step: a bar and one plain sentence.
+    The raw output is still captured, under "Technical log" (Technical details on). -#}
+<div class="runbox" {{ '' if flow.running == s.key else 'hidden' }} style="margin-top:14px">
+  <div class="bar indet"><i></i></div>
+  <div class="small" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:8px">
+    <span class="run-phase"><span class="spin"></span> {{ 'Working…' if flow.running == s.key else '' }}</span>
+    <span class="spacer"></span>
+    <span class="run-kept ok"></span>
+    <span class="run-skipped dim"></span>
+    <span class="run-elapsed faint tiny"></span>
+  </div>
+  <div class="run-result small" style="margin-top:8px"></div>
+  <details data-adv style="margin-top:8px">
+    <summary class="small dim">Technical log</summary>
+    <pre class="run-log mono" style="margin-top:6px; max-height:40vh; overflow:auto; font-size:12px;
+         line-height:1.6; background:var(--panel2); border-radius:8px; padding:10px 12px"></pre>
+    <a class="run-history small" href="/logs">Open in run history →</a>
+  </details>
+</div>

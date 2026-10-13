@@ -1,0 +1,111 @@
+{#- Step 1 body. Two essentials up front; everything with a sensible default sits
+    under "More options" as one labelled row per setting. The data-param names are
+    unchanged, so the server receives the same run parameters as before. -#}
+{% from '_icons.html' import icon %}
+{% set s = flow.steps.find %}
+{% set c = flow.counts %}
+{% set picked = p.selectable | selectattr('checked') | list | length %}
+<div class="step-body run-scope" data-step="crawl">
+  {% if s.error %}
+  <div class="callout callout-danger" role="alert" style="margin-bottom:14px">{{ icon('circle-x') }}
+    <div class="callout-text"><b>The last search stopped.</b> {{ s.error }}</div></div>
+  {% endif %}
+  {% if s.message %}
+  <div class="callout callout-warning" role="status" style="margin-bottom:14px">{{ icon('search') }}
+    <div class="callout-text">{{ s.message }}</div></div>
+  {% endif %}
+
+  <div class="fieldrow">
+    {% if p.keywords_primary %}
+    <div class="field" style="flex:1 1 360px; max-width:560px">
+      <label class="field-label" for="kw-{{ pipeline }}">{{ p.keyword_copy.label }}</label>
+      <input id="kw-{{ pipeline }}" type="text" class="control kw-input" data-param="keywords" value=""
+             placeholder="{{ p.keyword_copy.placeholder }}">
+      {% if p.keyword_copy.suggestions %}
+      <div class="suggest">Leave empty to search:
+        {% for k in p.keyword_copy.suggestions %}
+          <button type="button" class="kw-suggest" title="Add “{{ k }}”">{{ k }}</button>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="field">
+      <label class="field-label" for="days-{{ pipeline }}">How recent?</label>
+      <select id="days-{{ pipeline }}" class="control" data-param="days">
+        {% for ch in p.day_choices %}
+          <option value="{{ ch.value }}" {{ 'selected' if ch.value == '' }}>{{ ch.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <details class="more" style="margin-top:14px">
+    <summary>More options <span class="faint" style="font-weight:400">· {{ picked }} of {{ p.selectable|length }} {{ p.source_word_plural }}{%
+      for prm in p.params if prm.type == 'cap' %} · {{ 'at most %d %s'|format(prm.number_default, prm.unit) if prm.toggle_default else 'no limit' }}{% endfor %}</span></summary>
+    <div class="options">
+      {% if not p.keywords_primary %}
+      <label class="opt-label" for="kw-{{ pipeline }}">Only articles about</label>
+      <div class="inline">
+        <input id="kw-{{ pipeline }}" type="text" class="control kw-input" data-param="keywords" value=""
+               placeholder="{{ p.keyword_copy.placeholder }}" style="flex:1 1 280px; max-width:420px">
+        <span class="note">optional, comma-separated</span>
+      </div>
+      {% endif %}
+
+      <span class="opt-label">Railway news</span>
+      <div class="inline">
+        <label><input type="checkbox" class="kw-mode" data-param="keyword_mode" data-on="narrow" data-off="only" checked>
+          Keep only railway news</label>
+        <span class="note">untick to keep anything that mentions your keywords</span>
+      </div>
+
+      {% for prm in p.params %}
+        {% if prm.type == 'cap' %}
+        <span class="opt-label">Limit</span>
+        <div class="inline">
+          <label><input type="checkbox" class="cap-toggle" data-param="{{ prm.toggle_key }}" {{ 'checked' if prm.toggle_default }}>
+            At most</label>
+          <input type="number" min="1" max="200" class="control cap-number" data-param="{{ prm.number_key }}"
+                 value="{{ prm.number_default }}" aria-label="{{ prm.label }}" {{ '' if prm.toggle_default else 'disabled' }}>
+          <span class="dim">{{ prm.unit }}</span>
+        </div>
+        {% elif prm.type == 'checkbox' %}
+        <span class="opt-label">Language</span>
+        <div class="inline"><label><input type="checkbox" data-param="{{ prm.key }}" {{ 'checked' if prm.default }}> {{ prm.label }}</label></div>
+        {% endif %}
+      {% endfor %}
+
+      {% set many = p.selectable|length > 4 %}
+      <span class="opt-label {{ 'top' if many }}">{{ p.select_label|capitalize }}</span>
+      <div>
+        {% if many %}
+        <div class="inline" style="margin-bottom:8px">
+          <span class="pick-count small dim">{{ picked }} of {{ p.selectable|length }}</span>
+          <button type="button" class="btn-sm btn-ghost pick-all">All</button>
+          <button type="button" class="btn-sm btn-ghost pick-none">None</button>
+          <button type="button" class="btn-sm btn-ghost pick-reset">Default</button>
+        </div>
+        {% endif %}
+        <div class="{{ 'picklist' if many else 'inline' }}">
+          {% for opt in p.selectable %}
+          <label title="{{ opt.note }}" class="{{ 'unusable' if many and opt.note and not opt.checked }}">
+            <input type="checkbox" class="pick" data-value="{{ opt.value }}"
+                   data-default="{{ 1 if opt.checked else 0 }}" {{ 'checked' if opt.checked }}>
+            {% if many %}<span>{{ opt.label }}{% if opt.note %}<span class="note">{{ opt.note }}</span>{% endif %}</span>
+            {% else %}{{ opt.label }}{% if opt.note %} <span class="note">· {{ opt.note }}</span>{% endif %}{% endif %}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </details>
+
+  {% include '_runbox.html' %}
+
+  <div style="margin-top:18px">
+    <button type="button" class="btn-primary run-btn" data-step="crawl"
+            {% if c.found %}data-confirm="This replaces the {{ c.found }} articles found{% if c.written %} and clears the {{ c.written }} stories written from them{% endif %}. A backup copy is kept."{% endif %}
+            {{ 'disabled' if not flow.can_run }}>{{ icon('refresh-cw' if c.found else 'search') }}{{ 'Find again' if c.found else 'Find articles' }}</button>
+  </div>
+</div>

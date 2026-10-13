@@ -1,103 +1,77 @@
 {% extends "_base.html" %}
 {% block title %}Run history{% endblock %}
 
-{% block headerextra %}
-<span class="faint tiny">{{ files|length }} run(s) recorded</span>
-{% endblock %}
-
 {% block body %}
-<div style="display:grid; grid-template-columns:minmax(240px,300px) 1fr; gap:18px;
-            align-items:start">
-
-  <section class="panel" style="overflow:hidden">
-    <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
-      <strong style="font-size:14px">Past runs</strong>
-      <span class="faint tiny">newest first · every run is kept</span>
-    </div>
-
-    {# Filters. A flat list of "web-crawl" file names made the reader decode the
-       stage from the name; grouping by pipeline then stage, with the outcome
-       beside each run, answers "did the fetch work?" without opening anything. #}
-    <div class="switcher" style="padding:9px 14px; border-bottom:1px solid var(--line)">
-      <a href="/logs" class="chip" {% if not filt_p and not filt_s %}aria-current="page"{% endif %}>all</a>
-      {% for ap in all_pipelines %}
-        <a href="/logs?pipeline={{ ap.name }}{% if filt_s %}&step={{ filt_s }}{% endif %}" class="chip"
-           {% if filt_p == ap.name %}aria-current="page"{% endif %}>{{ ap.icon }} {{ ap.title }}</a>
-      {% endfor %}
-    </div>
-    <div class="switcher" style="padding:7px 14px; border-bottom:1px solid var(--line)">
-      {% for sk in ['crawl','generate','score'] %}
-        <a href="/logs?step={{ sk }}{% if filt_p %}&pipeline={{ filt_p }}{% endif %}" class="chip"
-           {% if filt_s == sk %}aria-current="page"{% endif %}>{{ step_meta[sk].n }} · {{ step_meta[sk].label }}</a>
-      {% endfor %}
-    </div>
-
-    {% if not files %}
-      <p class="dim small" style="padding:15px; margin:0">
-        {% if filt_p or filt_s %}No runs match this filter. <a href="/logs">Show all</a>.
-        {% else %}No runs yet. <a href="/">Run a step →</a>{% endif %}
-      </p>
-    {% endif %}
-
-    {% macro run_row(f) %}
-      <a href="/logs?f={{ f.name }}{% if filt_p %}&pipeline={{ filt_p }}{% endif %}{% if filt_s %}&step={{ filt_s }}{% endif %}"
-         style="display:flex; gap:9px; align-items:baseline; padding:8px 14px 8px 22px;
-                text-decoration:none; font-size:12.5px; border-bottom:1px solid var(--line);
-                color:{{ 'var(--accent)' if f.name == current else 'var(--ink)' }};
-                background:{{ 'var(--accent-soft)' if f.name == current else 'transparent' }}">
-        {# outcome, as a dot: green ok, red failed, spinner running, grey = older
-           run with no outcome recorded #}
-        {% if f.running %}<span class="spin" title="running now"></span>
-        {% elif f.state == 'ok' %}<span class="ok" title="finished OK">●</span>
-        {% elif f.state == 'error' %}<span class="err" title="failed">●</span>
-        {% else %}<span class="faint" title="recorded before outcomes were saved">○</span>{% endif %}
-        <span style="flex:1; min-width:0">
-          <span>{{ f.when }}</span>
-          <span class="dim"> · {{ (f.size / 1024) | round(1) }} kB{% if f.seconds and f.seconds != '?' %} · {{ f.seconds }}s{% endif %}</span>
-          {% if f.summary or f.error %}
-            <div class="{{ 'dim' if f.state == 'ok' else 'err' }} tiny"
-                 style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis">
-              {{ (f.summary or f.error)[:90] }}</div>
-          {% endif %}
-        </span>
-      </a>
-    {% endmacro %}
-
-    {% for g in groups %}
-      <div style="padding:9px 14px 5px; font-weight:620; font-size:13px;
-                  border-bottom:1px solid var(--line); background:var(--panel2)">
-        {{ g.icon }} {{ g.title }}</div>
-      {% for st in g.stages %}
-        <div class="dim tiny" style="padding:6px 14px 3px; font-weight:600; letter-spacing:.02em">
-          {{ step_meta[st.key].n }} · {{ st.label }} <span class="faint">· {{ st.runs|length }}</span></div>
-        {% for f in st.runs %}{{ run_row(f) }}{% endfor %}
-      {% endfor %}
-    {% endfor %}
-    {% if other %}
-      <div class="dim tiny" style="padding:6px 14px 3px; font-weight:600">other</div>
-      {% for f in other %}{{ run_row(f) }}{% endfor %}
-    {% endif %}
-  </section>
-
+{% from '_icons.html' import icon %}
+{% from '_status_badge.html' import status with context %}
+<header class="page-header">
   <div>
-    {% if warnings %}
-    <section class="panel" style="margin-bottom:14px; border-color:var(--warn)">
-      <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
-        <strong style="font-size:14px" class="warn">{{ warnings|length }} line(s) worth reading</strong>
-        <span class="faint tiny">warnings, skips and errors — read these first</span>
+    <h1>Run history</h1>
+    <p class="lede">Every step that was run, newest first, one line each. Pick a run to read its full output.</p>
+    <div class="meta small dim">{{ files|length }} run{{ '' if files|length == 1 else 's' }} recorded · every run is kept</div>
+  </div>
+</header>
+
+<div class="stack" style="margin-bottom:16px">
+  <div class="switcher" role="group" aria-label="Source">
+    <a href="/logs{% if filt_s %}?step={{ filt_s }}{% endif %}" class="chip" {% if not filt_p %}aria-current="page"{% endif %}>All sources</a>
+    {% for ap in all_pipelines %}
+      <a href="/logs?pipeline={{ ap.name }}{% if filt_s %}&step={{ filt_s }}{% endif %}" class="chip"
+         {% if filt_p == ap.name %}aria-current="page"{% endif %}>{{ icon(ap.nav_icon, 14) }}{{ ap.short or ap.title }}</a>
+    {% endfor %}
+  </div>
+  <div class="switcher" role="group" aria-label="Step">
+    <a href="/logs{% if filt_p %}?pipeline={{ filt_p }}{% endif %}" class="chip" {% if not filt_s %}aria-current="page"{% endif %}>All steps</a>
+    {% for sk in ['crawl', 'generate', 'score'] %}
+      <a href="/logs?step={{ sk }}{% if filt_p %}&pipeline={{ filt_p }}{% endif %}" class="chip"
+         {% if filt_s == sk %}aria-current="page"{% endif %}>{{ step_meta[sk].label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="split">
+  <div>
+    {% if not files %}
+      <div class="empty">{{ icon('history', 24) }}
+        <div class="empty-title">{{ 'No runs match this filter' if filt_p or filt_s else 'No runs yet' }}</div>
+        <div class="empty-action">
+          {% if filt_p or filt_s %}<a class="btn btn-sm" href="/logs">Show all runs</a>
+          {% else %}<a class="btn btn-sm btn-primary" href="/">Start from Home</a>{% endif %}</div>
       </div>
-      <pre class="warn mono" style="padding:13px 15px; font-size:12.5px;
-           max-height:30vh; overflow:auto">{{ warnings | join('\n') }}</pre>
+    {% endif %}
+    {% for label, runs in days %}
+      <div class="day-head">{{ label }}</div>
+      <ul class="runlist">
+        {% for f in runs %}
+        <li {% if f.name == current %}aria-current="true"{% endif %}>
+          <span class="time">{{ f.time or '—' }}</span>
+          <div style="min-width:0">
+            <a href="/logs?f={{ f.name }}{% if filt_p %}&pipeline={{ filt_p }}{% endif %}{% if filt_s %}&step={{ filt_s }}{% endif %}"
+               style="color:var(--text); text-decoration:none"><b style="font-weight:500">{{ f.step_label }}</b>
+              <span class="dim">· {{ f.source }}</span></a>
+            {% if f.summary or f.error %}
+              <div class="small {{ 'dim' if f.state == 'ok' else 'err' }}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ (f.summary or f.error)[:120] }}</div>
+            {% endif %}
+          </div>
+          <span>{{ status('running' if f.running else f.state) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    {% endfor %}
+  </div>
+
+  <div style="position:sticky; top:0">
+    {% if warnings %}
+    <section class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h2 class="warn" style="display:flex; gap:8px; align-items:center">{{ icon('triangle-alert') }}{{ warnings|length }} line{{ '' if warnings|length == 1 else 's' }} worth reading</h2>
+        <span class="small dim">warnings, skips and errors</span></div>
+      <pre class="mono warn" style="padding:14px 20px; font-size:12.5px; max-height:30vh; overflow:auto">{{ warnings | join('\n') }}</pre>
     </section>
     {% endif %}
-
     <section class="panel">
-      <div style="padding:10px 14px; border-bottom:1px solid var(--line)">
-        <strong style="font-size:14px" class="mono">{{ current or 'no run selected' }}</strong>
-        <span class="faint tiny">full output</span>
-      </div>
-      <pre class="mono" style="padding:13px 15px; font-size:12.5px; line-height:1.65;
-                  max-height:70vh; overflow:auto">{{ body }}</pre>
+      <div class="panel-head"><h2 class="mono" style="font-size:var(--text-body)">{{ current or 'No run selected' }}</h2>
+        <span class="small dim">full output</span></div>
+      <pre class="mono" style="padding:14px 20px; font-size:12.5px; line-height:1.65; max-height:70vh; overflow:auto">{{ body }}</pre>
     </section>
   </div>
 </div>

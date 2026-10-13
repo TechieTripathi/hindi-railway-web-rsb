@@ -44,7 +44,7 @@ import re
 
 from shared.grounding import TOPIC_LEXICON, TOPIC_VOCABULARY
 from shared.hindi_text import (
-    light_stem, normalize_hi, term_in, title_words, tokenize_hi,
+    light_stem, normalize_hi, term_in, title_words, token_stems, tokenize_hi,
 )
 
 #: Stemmed-title-word overlap at or above which two articles are the same event.
@@ -105,24 +105,38 @@ def story_key(title: str) -> set:
     return {light_stem(w) for w in title_words(title or "")}
 
 
+#: derive_topics results by (title, body). The control panel recomputes clusters on
+#: every page load, and topics depend only on the text, so each article's topics are
+#: worked out once per process. Bounded so a long-running panel cannot grow forever.
+_TOPIC_CACHE: dict = {}
+_TOPIC_CACHE_MAX = 50_000
+
+
 def derive_topics(article: dict, limit: int = 3) -> list[str]:
     """Topics evidenced by the article's own text, strongest first.
 
     Ranked by how many distinct lexicon terms fired, so a body that mentions three
     infrastructure words outranks one that mentions a single passenger word.
     """
-    blob = normalize_hi("%s %s" % (article.get("title") or "",
-                                   article.get("body") or "")).lower()
-    tokens = {w.lower() for w in tokenize_hi(
-        "%s %s" % (article.get("title") or "", article.get("body") or ""),
-        min_hi=2, min_en=3)}
+    text = "%s %s" % (article.get("title") or "", article.get("body") or "")
+    key = (text, limit)
+    hit = _TOPIC_CACHE.get(key)
+    if hit is not None:
+        return list(hit)
+    blob = normalize_hi(text).lower()
+    tokens = {w.lower() for w in tokenize_hi(text, min_hi=2, min_en=3)}
+    stems = token_stems(tokens)        # stem each token once, not once per lexicon term
     scored = []
     for topic in TOPIC_VOCABULARY:
-        hits = [t for t in TOPIC_LEXICON.get(topic, []) if term_in(t, tokens, blob)]
+        hits = [t for t in TOPIC_LEXICON.get(topic, []) if term_in(t, tokens, blob, stems)]
         if hits:
             scored.append((len(hits), topic))
     scored.sort(key=lambda p: (-p[0], p[1]))
-    return [t for _, t in scored[:limit]]
+    result = [t for _, t in scored[:limit]]
+    if len(_TOPIC_CACHE) >= _TOPIC_CACHE_MAX:
+        _TOPIC_CACHE.clear()
+    _TOPIC_CACHE[key] = tuple(result)
+    return result
 
 
 def build_clusters(articles: list, mode: str = "story",

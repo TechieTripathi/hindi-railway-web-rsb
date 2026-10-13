@@ -1,0 +1,71 @@
+{#- Step 4 body: the stories written from the current selection, each with a status
+    (icon + word), its three quality numbers, and a link to read it beside the original. -#}
+{% from '_icons.html' import icon %}
+{% from '_quality.html' import quality %}
+{% from '_status_badge.html' import status with context %}
+{% set s = flow.steps.review %}
+{% set c = flow.counts %}
+<div class="step-body run-scope" data-step="score">
+  {% if s.error %}
+  <div class="callout callout-danger" role="alert" style="margin-bottom:12px">{{ icon('circle-x') }}
+    <div class="callout-text"><b>The last quality check stopped.</b> {{ s.error }}</div></div>
+  {% endif %}
+  {% if c.unchecked %}
+  <div class="callout callout-warning" role="status" style="margin-bottom:12px">{{ icon('triangle-alert') }}
+    <div class="callout-text"><b>{{ c.unchecked }} stor{{ 'y has' if c.unchecked == 1 else 'ies have' }} not been checked yet.</b>
+      The check is free and takes about a second.</div>
+    <button type="button" class="btn-sm run-btn" data-step="score" {{ 'disabled' if not flow.can_run }}>Check quality</button>
+  </div>
+  {% endif %}
+
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+    <strong>{{ review_rows|length }} stor{{ 'y' if review_rows|length == 1 else 'ies' }}</strong>
+    {% if review_stage == 'scored' %}
+    <span class="small dim tabular">· {{ review_rows|length - needs_look }} look fine ·
+      <span class="{{ 'warn' if needs_look else 'dim' }}">{{ needs_look }} need{{ 's' if needs_look == 1 }} a closer look</span></span>
+    <span class="switcher" role="group" aria-label="Show">
+      <button type="button" class="chip look-chip" data-look="all" aria-current="page">All</button>
+      <button type="button" class="chip look-chip" data-look="look">{{ icon('triangle-alert', 14) }}Needs a closer look</button>
+    </span>
+    {% endif %}
+    <span class="spacer"></span>
+    <a class="small" href="/scores">{{ icon('info', 14) }} What do these numbers mean?</a>
+  </div>
+
+  {% if review_rows %}
+  <div class="stack">
+    {% for r in review_rows %}
+    {% set q = r.quality %}
+    <article class="panel review-row" data-look="{{ 1 if q.needs_look else 0 }}"
+             style="padding:16px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px 16px; align-items:start">
+      <div>{{ status('look' if q.needs_look else ('fine' if q.checked else 'unchecked')) }}</div>
+      <div style="min-width:0">
+        <div style="font-weight:500; line-height:1.45">{{ r.ai_headline or r.title }}</div>
+        <div class="faint small" style="margin-top:2px">from {{ r.source_label }}{% if r.date %} · {{ r.date }}{% endif %}{% if r.ai_headline and r.ai_headline != r.title %} · original: {{ r.title }}{% endif %}</div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px">{{ quality(q) }}</div>
+        {% if q.failures %}
+        <details class="tech" style="margin-top:8px">
+          <summary>Why it needs a look ({{ q.failures|length }})</summary>
+          <div class="tech-body">{% for f in q.failures %}<div>• {{ f }}</div>{% endfor %}</div>
+        </details>
+        {% endif %}
+      </div>
+      <a class="btn btn-sm" href="/verify/{{ pipeline }}/{{ r.i }}?stage={{ review_stage }}">Open side by side {{ icon('arrow-right') }}</a>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">{{ icon('inbox', 24) }}
+    <div class="empty-title">No stories for the current selection</div>
+    <div class="empty-text">Stories written from articles you later discarded, or with another way of combining articles, are not shown.</div>
+    <div class="empty-action"><a class="btn btn-sm" href="?open=write">Go to Write stories</a></div>
+  </div>
+  {% endif %}
+
+  {% include '_runbox.html' %}
+
+  <div data-adv class="small" style="margin-top:12px; display:flex; gap:14px; flex-wrap:wrap; align-items:center">
+    <button type="button" class="btn-sm run-btn" data-step="score" {{ 'disabled' if not flow.can_run }}>{{ icon('refresh-cw') }}Check quality again</button>
+    <a href="/data/{{ pipeline }}?stage={{ review_stage }}">All stories in a table →</a>
+  </div>
+</div>

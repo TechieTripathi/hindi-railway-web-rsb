@@ -53,7 +53,7 @@ def config_hash(module):
 
 
 #: Package directories walked by code_hash, relative to research/.
-_CODE_DIRS = ("", "shared", "web_search", "rsb_search", "vendor")
+_CODE_DIRS = ("", "shared", "web_search", "rsb_search", "keyword_search", "vendor")
 
 
 def code_hash(filenames=None):

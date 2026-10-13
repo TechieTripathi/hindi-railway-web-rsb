@@ -6,13 +6,13 @@
    bare `return "no article 0 in crawl (0 present)", 404` string: correct, but
    unstyled, with no navigation and no way forward. #}
 {% block body %}
-<div class="panel" style="padding:26px 28px; max-width:680px">
-  <h2 style="margin:0 0 8px; font-size:17px">{{ heading }}</h2>
-  <p class="dim" style="margin:0 0 16px; line-height:1.6">{{ detail }}</p>
-  <div style="display:flex; gap:10px; flex-wrap:wrap">
+{% from '_icons.html' import icon %}
+<div class="empty" style="max-width:640px; margin:40px auto 0">{{ icon('inbox', 24) }}
+  <div class="empty-title">{{ heading }}</div>
+  <div class="empty-text">{{ detail }}</div>
+  <div class="empty-action" style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center">
     {% for a in actions %}
-      <a href="{{ a.href }}" class="btn btn-sm {{ 'btn-primary' if loop.first }}"
-         style="text-decoration:none">{{ a.label }}</a>
+      <a href="{{ a.href }}" class="btn btn-sm {{ 'btn-primary' if loop.first }}">{{ a.label }}</a>
     {% endfor %}
   </div>
 </div>

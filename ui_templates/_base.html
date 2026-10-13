@@ -1,353 +1,116 @@
+{% from '_icons.html' import icon %}
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Railway research{% endblock %}</title>
-<style>
-  :root {
-    --bg:#f4f6f8; --panel:#ffffff; --panel2:#f8fafc; --line:#e2e6ec;
-    --ink:#1b1f24; --dim:#61707f; --faint:#8b98a6;
-    --accent:#2563eb; --accent-soft:#eef4ff; --accent-line:#c3d7fb;
-    --ok:#12805c; --ok-soft:#e7f7f0; --warn:#a1600a; --warn-soft:#fdf3e2;
-    --err:#c0342c; --err-soft:#fdeceb;
-    --radius:10px;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  /* Dark palette, applied in two situations. The token list is repeated rather
-     than shared because a media query and a plain attribute selector cannot be
-     combined into one rule — keep the two blocks in sync.
+<title>{% block title %}Railway research{% endblock %} · Railway research</title>
+{# Before the stylesheet: theme, Technical details and sidebar state are applied
+   before the first paint, so nothing flashes. #}
+<script src="{{ url_for('static', filename='theme-init.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='ui.css') }}">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
 
-     1. The OS asks for dark AND the reader has not explicitly chosen light.
-        The `:not([data-theme="light"])` guard is what lets the toggle win. */
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:#14171c; --panel:#1c2027; --panel2:#22272f; --line:#2e343d;
-      --ink:#e7ebf0; --dim:#98a5b4; --faint:#77848f;
-      --accent:#75a8ff; --accent-soft:#1d2837; --accent-line:#33455f;
-      --ok:#5ed6a4; --ok-soft:#16291f; --warn:#f0b45a; --warn-soft:#2b2317;
-      --err:#ff8a80; --err-soft:#2c1c1c;
-    }
-  }
-  /* 2. The reader chose dark outright, whatever the OS says. */
-  :root[data-theme="dark"] {
-    --bg:#14171c; --panel:#1c2027; --panel2:#22272f; --line:#2e343d;
-    --ink:#e7ebf0; --dim:#98a5b4; --faint:#77848f;
-    --accent:#75a8ff; --accent-soft:#1d2837; --accent-line:#33455f;
-    --ok:#5ed6a4; --ok-soft:#16291f; --warn:#f0b45a; --warn-soft:#2b2317;
-    --err:#ff8a80; --err-soft:#2c1c1c;
-  }
-  * { box-sizing:border-box; }
-  body {
-    margin:0; background:var(--bg); color:var(--ink);
-    font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-         "Helvetica Neue", Arial, "Noto Sans Devanagari", sans-serif;
-  }
-  code, pre, .mono { font-family:var(--mono); }
-  a { color:var(--accent); }
-  h1,h2,h3 { line-height:1.3; }
+{#- Which sidebar item is current. Source pages and the side-by-side view belong to
+    their source; the researcher pages have their own items. -#}
+{%- set _pl = pipeline if pipeline is defined and pipeline else '' -%}
+{%- set _crumb = {'data': 'All articles', 'logs': 'Run history', 'clusters': 'Story grouping',
+                  'scores': 'How quality is measured', 'verify': 'Side by side'}.get(nav) -%}
 
-  header {
-    background:var(--panel); border-bottom:1px solid var(--line);
-    padding:0 22px; position:sticky; top:0; z-index:20;
-  }
-  .hrow { display:flex; gap:20px; align-items:center; min-height:56px; flex-wrap:wrap; }
-  .brand { font-size:15px; font-weight:650; margin:0; letter-spacing:-.01em; }
-  nav { display:flex; gap:4px; }
-  nav a {
-    text-decoration:none; color:var(--dim); font-size:14px; font-weight:500;
-    padding:6px 11px; border-radius:7px;
-  }
-  nav a:hover { background:var(--panel2); color:var(--ink); }
-  nav a[aria-current] { background:var(--accent-soft); color:var(--accent); }
-  .spacer { flex:1; }
+<div class="shell">
+  <aside class="sidebar" aria-label="Main">
+    <a class="brand" href="/" title="Railway research">
+      <span class="brandmark">{{ icon('train-front', 18) }}</span>
+      <span class="brand-text"><strong>Railway research</strong><span>Hindi news desk</span></span>
+    </a>
+    <nav class="nav">
+      <div class="nav-section">Workspace</div>
+      <a class="nav-item" href="/" title="Home" {% if nav == 'panel' and not _pl %}aria-current="page"{% endif %}>
+        {{ icon('house', 18) }}<span class="nav-label">Home</span></a>
+      {% for ap in all_pipelines %}
+      <a class="nav-item" href="/panel/{{ ap.name }}" title="{{ ap.title }}"
+         {% if nav in ['panel', 'verify'] and _pl == ap.name %}aria-current="page"{% endif %}>
+        {{ icon(ap.nav_icon, 18) }}<span class="nav-label">{{ ap.short or ap.title }}</span>
+        {% if shell.running and shell.running.pipeline == ap.name %}<span class="nav-dot" title="Running"></span>{% endif %}
+      </a>
+      {% endfor %}
 
-  main { padding:22px; max-width:1560px; margin:0 auto; }
+      <div class="nav-section">Help</div>
+      <a class="nav-item" href="/scores" title="How quality is measured" {% if nav == 'scores' %}aria-current="page"{% endif %}>
+        {{ icon('gauge', 18) }}<span class="nav-label">How quality is measured</span></a>
 
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); }
-  .panel-head {
-    display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
-    padding:13px 16px; border-bottom:1px solid var(--line);
-  }
-  .panel-head strong { font-size:14px; font-weight:620; }
-
-  .dim { color:var(--dim); } .faint { color:var(--faint); }
-  .ok { color:var(--ok); } .warn { color:var(--warn); } .err { color:var(--err); }
-  .small { font-size:13px; }
-  .tiny { font-size:12px; }
-
-  .chip {
-    display:inline-flex; align-items:center; gap:5px; border-radius:999px;
-    padding:2px 9px; font-size:12px; font-weight:550; white-space:nowrap;
-    background:var(--panel2); color:var(--dim); border:1px solid var(--line);
-  }
-  .chip-ok   { background:var(--ok-soft);   color:var(--ok);   border-color:transparent; }
-  .chip-warn { background:var(--warn-soft); color:var(--warn); border-color:transparent; }
-  .chip-err  { background:var(--err-soft);  color:var(--err);  border-color:transparent; }
-  .chip-next { background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line); }
-
-  button, .btn {
-    font:inherit; font-size:14px; font-weight:550; cursor:pointer;
-    background:var(--panel); color:var(--ink); border:1px solid var(--line);
-    border-radius:8px; padding:9px 15px; white-space:nowrap;
-  }
-  button:hover:not(:disabled), .btn:hover { border-color:var(--accent); color:var(--accent); }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  .btn-primary {
-    background:var(--accent); border-color:var(--accent); color:#fff;
-    box-shadow:0 1px 3px rgba(37,99,235,.28);
-  }
-  .btn-primary:hover:not(:disabled) { filter:brightness(1.07); color:#fff; }
-  .btn-sm { padding:5px 11px; font-size:13px; }
-
-  input[type=number], input[type=text] {
-    font:inherit; font-size:14px; background:var(--panel); color:var(--ink);
-    border:1px solid var(--line); border-radius:7px; padding:6px 9px;
-  }
-  input[type=number] { width:78px; }
-  input:focus { outline:2px solid var(--accent-line); outline-offset:0; border-color:var(--accent); }
-
-  pre { margin:0; white-space:pre-wrap; word-break:break-word; }
-  /* Article text: keep <pre>'s whitespace handling, drop its monospace font —
-     a verifier reads paragraphs of Hindi and English, not code. */
-  pre.prose { font-family:inherit; }
-  details > summary { cursor:pointer; color:var(--dim); font-size:13px; }
-  details > summary:hover { color:var(--accent); }
-
-  .spin {
-    display:inline-block; width:13px; height:13px; border-radius:50%;
-    border:2px solid var(--accent-line); border-top-color:var(--accent);
-    animation:spin .7s linear infinite; vertical-align:-2px;
-  }
-  @keyframes spin { to { transform:rotate(360deg); } }
-
-  /* ── Two-pane verification layout ────────────────────────────────────────
-     Source on the left, AI output on the right, each pane scrolling on its
-     OWN so a 6000-char body can be read against a short story without either
-     side dragging the whole page. One scrollbar per pane — not one per field.
-
-     The panes are grid items, so `stretch` already equalises their height:
-     short articles give two short panes, long ones give two panes capped at
-     78vh. That is what keeps the two headers, and the two scrollbars, level.
-     `min-height:0` on the scroll region is required — without it a flex child
-     refuses to shrink below its content and the pane grows instead of
-     scrolling. */
-  .twopane { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  .pane { display:flex; flex-direction:column; max-height:78vh; overflow:hidden; }
-  .pane > .panel-head { flex:0 0 auto; }
-  /* Scroll chaining is deliberately LEFT ON (no `overscroll-behavior:contain`).
-     A pane that has hit its bottom must hand the wheel to the page, so a reader
-     can keep scrolling straight through to the sources section below instead of
-     the page appearing to jam. `min-height:0` + `overflow-y:auto` are what give
-     each pane its own scrollbar; neither affects chaining. */
-  .pane-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; }
-  /* Which AI field you are reading stays visible while its text scrolls past. */
-  .pane-scroll .fieldhead {
-    position:sticky; top:0; z-index:1; background:var(--panel);
-    display:flex; gap:9px; align-items:baseline;
-    padding:9px 16px 5px; border-bottom:1px solid var(--line);
-  }
-  /* Below this width two panes are narrower than a line of Hindi text, so they
-     stack and the page scrolls again. The only breakpoint in the app — a
-     side-by-side layout is the one thing here that genuinely cannot reflow. */
-  @media (max-width:900px) {
-    .twopane { grid-template-columns:1fr; }
-    .pane { max-height:none; }
-  }
-
-  /* ── Colour-coded output sections ─────────────────────────────────────────
-     A non-technical reviewer should be able to tell a news story from a tweet
-     without reading the label. Each block carries a `tone-*` class that sets
-     one `--tone` custom property; the left edge and the heading both take their
-     colour from it, so adding a section type means adding one class, not
-     editing three rules.
-
-     The social colours are the networks' own, and are deliberately the same
-     values the product webapp uses for its `.social-*` cards, so the two UIs
-     do not teach conflicting colour meanings. They are fixed brand colours, so
-     they are stated once rather than per theme — each is paired with the
-     theme's own panel background, not a tinted one, to stay legible in both. */
-  .tone-story { --tone:var(--accent); }
-  .tone-tw    { --tone:#1da1f2; }
-  .tone-fb    { --tone:#1877f2; }
-  .tone-gen   { --tone:#6c757d; }
-  .tone-extra { --tone:var(--faint); }
-
-  .outblock { border-left:3px solid var(--tone); border-bottom:1px solid var(--line); }
-  .outblock > .fieldhead > strong { color:var(--tone); }
-  /* The swatch repeats the colour as a shape, so the grouping survives both
-     colour-blindness and a greyscale print. */
-  .outblock > .fieldhead .swatch {
-    display:inline-block; width:8px; height:8px; border-radius:2px;
-    background:var(--tone); margin-right:2px; flex:0 0 auto;
-  }
-
-  /* ── Run-the-pipeline form fields ─────────────────────────────────────────
-     Every control here used to be an inline `.small .dim` label sitting beside
-     its input at the same weight and colour, so nothing read as a label and the
-     three selects each repeated the same eight inline properties. Label above
-     control, label in the ink colour at a smaller weight-forward size, and one
-     `.control` class for every input. A hint line under each field carries the
-     plain-language explanation that previously only existed in a `title`
-     tooltip — invisible to anyone who does not think to hover. */
-  .fieldrow { display:flex; gap:22px 26px; flex-wrap:wrap; align-items:flex-start; }
-  .field { display:flex; flex-direction:column; gap:4px; min-width:0; }
-  .field-label {
-    font-size:12.5px; font-weight:620; color:var(--ink); letter-spacing:.005em;
-    display:flex; align-items:baseline; gap:6px;
-  }
-  .field-label .opt { font-weight:400; color:var(--faint); font-size:11.5px; }
-  .field-hint { font-size:11.5px; line-height:1.45; color:var(--faint); max-width:260px; }
-  .control {
-    font:inherit; font-size:14px; padding:6px 9px; border-radius:7px;
-    background:var(--panel); color:var(--ink); border:1px solid var(--line);
-  }
-  .control:disabled { opacity:.5; cursor:not-allowed; }
-  .control:focus { outline:2px solid var(--accent-line); outline-offset:0; border-color:var(--accent); }
-  /* The cap field swaps between a long note ("No cap — takes everything in the
-     date window.") and a short one ("Capped at this many."). Its width followed
-     the text, so ticking the box shrank the field, it suddenly fitted on the
-     previous line, and the whole control jumped rows. A fixed width — the same
-     260px the hints already cap at — makes the footprint independent of state,
-     so nothing moves when you tick it. */
-  .field-cap { width:260px; }
-
-  /* A checkbox reads as a sentence, so it keeps its label inline. */
-  .field-check { flex-direction:row; align-items:center; gap:8px; cursor:pointer; }
-  .field-check .field-label { font-weight:500; }
-
-  /* ── Landing cards + pipeline switcher ────────────────────────────────────
-     The whole card is the link, so the hover has to say so. The switcher strip
-     is the same chip row on every pipeline-scoped page, built from the registry,
-     so no page hardcodes which "other" pipeline exists. */
-  .pipecard { transition:border-color .12s, box-shadow .12s; }
-  .pipecard:hover { border-color:var(--accent-line); box-shadow:0 2px 10px rgba(37,99,235,.10); }
-  .pipecard:hover .btn { border-color:var(--accent); color:var(--accent); }
-  .pipecard:hover .btn-primary { color:#fff; }
-  .switcher { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-  .switcher .chip { text-decoration:none; }
-  .switcher .chip:hover { color:var(--accent); border-color:var(--accent-line); }
-  .switcher .chip[aria-current] { background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line); }
-
-  /* ── Stage pills (Browse articles) ────────────────────────────────────────
-     `.pill` was referenced by data.html but never defined, so the stage links
-     set a `border-color` with no border-width and rendered as bare text — the
-     three stages were visually indistinguishable. They are a PIPELINE, so they
-     are numbered and colour-coded: crawled (grey, no AI involved), AI written
-     (blue, the accent used everywhere else for model output), quality checked
-     (green, the ok colour). The selected one is filled, not merely tinted, so
-     "which am I looking at" survives a glance. */
-  .stagepill {
-    display:inline-flex; align-items:center; gap:7px; text-decoration:none;
-    padding:6px 13px 6px 8px; border-radius:999px; font-size:13px; font-weight:550;
-    border:1px solid var(--line); background:var(--panel); color:var(--dim);
-  }
-  .stagepill:hover { border-color:var(--tone); color:var(--tone); }
-  .stagepill .step {
-    display:inline-flex; align-items:center; justify-content:center;
-    width:19px; height:19px; border-radius:50%; font-size:11.5px; font-weight:700;
-    background:var(--tone); color:var(--panel); flex:0 0 auto;
-  }
-  .stagepill .n { color:var(--faint); font-weight:500; font-variant-numeric:tabular-nums; }
-  .stagepill[aria-current] {
-    background:var(--tone); border-color:var(--tone); color:#fff;
-  }
-  .stagepill[aria-current] .step { background:rgba(255,255,255,.25); color:#fff; }
-  .stagepill[aria-current] .n { color:rgba(255,255,255,.8); }
-  .stagepill.empty { opacity:.5; }
-  /* The arrow between pills, so the three read as a sequence not a menu. */
-  .stagearrow { color:var(--faint); font-size:13px; }
-  .tone-crawl { --tone:#6c757d; }
-  .tone-ok    { --tone:var(--ok); }
-
-  /* ── Language tabs ────────────────────────────────────────────────────────
-     Hindi and English are the SAME story, so they belong behind a toggle
-     rather than stacked — stacking invites reading the translation as extra
-     content. Plain buttons over a radio-less tablist: no library, and it
-     degrades to showing the first language if JS never runs. */
-  .langtabs {
-    display:flex; gap:5px; align-items:center; flex-wrap:wrap;
-    padding:10px 16px 0;
-  }
-  .langtab {
-    font:inherit; font-size:13px; font-weight:550; cursor:pointer;
-    padding:4px 12px; border-radius:999px; white-space:nowrap;
-    background:var(--panel2); color:var(--dim); border:1px solid var(--line);
-  }
-  .langtab:hover { color:var(--accent); border-color:var(--accent-line); }
-  .langtab[aria-selected="true"] {
-    background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line);
-  }
-
-  /* Theme toggle. Three states so the default stays "follow the OS" — adding a
-     switch should not take that away from anyone who never touches it. */
-  .themetoggle {
-    display:inline-flex; align-items:center; gap:6px; padding:5px 11px;
-    font-size:13px; font-weight:550; line-height:1.4;
-  }
-  .themetoggle .tt-icon { font-size:14px; }
-  /* Only the label for the ACTIVE state is shown; the other two are collapsed. */
-  .themetoggle [data-when] { display:none; }
-  :root:not([data-theme]) .themetoggle [data-when="system"],
-  :root[data-theme="light"] .themetoggle [data-when="light"],
-  :root[data-theme="dark"]  .themetoggle [data-when="dark"] { display:inline; }
-
-  .bar { height:6px; background:var(--panel2); border-radius:999px; overflow:hidden; }
-  .bar > i { display:block; height:100%; background:var(--accent); width:0;
-             transition:width .35s ease; border-radius:999px; }
-  .bar.indet > i { width:34%; animation:slide 1.5s ease-in-out infinite; }
-  @keyframes slide { 0%{margin-left:-34%} 100%{margin-left:100%} }
-</style>
-<script>
-  // Applied before the first paint deliberately: read the stored choice and
-  // stamp it on <html> now, or the page renders in the OS theme for one frame
-  // and then snaps to the chosen one. Absent/invalid value = follow the OS,
-  // which is what every reader who never touches the toggle keeps getting.
-  try {
-    var t = localStorage.getItem('theme');
-    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-  } catch (e) { /* private mode / blocked storage: fall through to the OS theme */ }
-</script>
-<header>
-  <div class="hrow">
-    <h1 class="brand">🚆 Railway research</h1>
-    <nav>
-      {% set navp = pipeline if pipeline is defined and pipeline else all_pipelines[0].name %}
-      <a href="/" {% if nav == 'panel' %}aria-current="page"{% endif %}>Run the pipeline</a>
-      <a href="/data/{{ navp }}" {% if nav == 'data' %}aria-current="page"{% endif %}>Browse articles</a>
-      <a href="/logs" {% if nav == 'logs' %}aria-current="page"{% endif %}>Run history</a>
-      <a href="/clusters/{{ navp }}" {% if nav == 'clusters' %}aria-current="page"{% endif %}>Report grouping</a>
-      <a href="/scores" {% if nav == 'scores' %}aria-current="page"{% endif %}>How scores work</a>
+      {# Researcher pages. Shown with Technical details on — or when you are on one,
+         so a shared link still shows where you are. #}
+      <div class="nav-section" {% if nav not in ['data', 'logs', 'clusters'] %}data-adv{% endif %}>Technical</div>
+      <a class="nav-item" href="/logs" title="Run history" {% if nav == 'logs' %}aria-current="page"{% else %}data-adv{% endif %}>
+        {{ icon('history', 18) }}<span class="nav-label">Run history</span></a>
+      <a class="nav-item" href="/data/{{ _pl or all_pipelines[0].name }}" title="All articles (table)" {% if nav == 'data' %}aria-current="page"{% else %}data-adv{% endif %}>
+        {{ icon('table', 18) }}<span class="nav-label">All articles (table)</span></a>
+      <a class="nav-item" href="/clusters/{{ _pl or all_pipelines[0].name }}" title="Story grouping preview" {% if nav == 'clusters' %}aria-current="page"{% else %}data-adv{% endif %}>
+        {{ icon('layers', 18) }}<span class="nav-label">Story grouping preview</span></a>
     </nav>
-    <span class="spacer"></span>
-    <button type="button" class="btn themetoggle" id="themetoggle"
-            title="Switch between the light and dark palette. Starts on whatever your system asks for.">
-      <span class="tt-icon" data-when="system">◑</span>
-      <span class="tt-icon" data-when="light">☀</span>
-      <span class="tt-icon" data-when="dark">☾</span>
-      <span data-when="system">auto</span>
-      <span data-when="light">light</span>
-      <span data-when="dark">dark</span>
-    </button>
-    {% block headerextra %}{% endblock %}
+    <div class="sidebar-foot" title="{{ 'Anthropic key found' if shell.ai_key else 'No Anthropic key: stories cannot be written' }}">
+      <span class="keydot {{ 'ok' if shell.ai_key else 'err' }}"></span>
+      <div class="text">
+        <div class="label">{{ 'AI key ready' if shell.ai_key else 'No AI key' }}</div>
+        <div class="detail">{{ 'Stories can be written.' if shell.ai_key else 'Add ANTHROPIC_API_KEY to .env.' }}
+          Brave search {{ 'on' if shell.brave_key else 'off' }}.</div>
+      </div>
+    </div>
+  </aside>
+  <div class="drawer-overlay"></div>
+
+  <div class="shell-col">
+    <header class="app-header">
+      <button type="button" class="btn-ghost btn-icon" id="navtoggle" aria-label="Show or hide the menu (Ctrl+B)"
+              title="Show or hide the menu (Ctrl+B)">{{ icon('panel-left') }}</button>
+      <span class="vdiv"></span>
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="/">Home</a>
+        {% if _pl and nav in ['panel', 'verify', 'data', 'clusters'] %}
+          {{ icon('chevron-right') }}
+          {% if nav == 'panel' %}<span aria-current="page">{{ all_pipelines|selectattr('name', 'equalto', _pl)|map(attribute='title')|first }}</span>
+          {% else %}<a href="/panel/{{ _pl }}">{{ all_pipelines|selectattr('name', 'equalto', _pl)|map(attribute='title')|first }}</a>{% endif %}
+        {% endif %}
+        {% if _crumb %}{{ icon('chevron-right') }}<span aria-current="page">{{ _crumb }}</span>{% endif %}
+      </nav>
+
+      {% if shell.running %}
+        <a class="status-pill running" href="/panel/{{ shell.running.pipeline }}" title="Open the running step">
+          {{ icon('loader-circle', 14, 'spinning') }}<span class="pill-text">{{ shell.running.label }} · {{ shell.running.title }}</span></a>
+      {% elif shell.last %}
+        <a class="status-pill {{ 'ok' if shell.last.state == 'ok' else ('err' if shell.last.state == 'error' else '') }}"
+           href="/panel/{{ shell.last.pipeline }}" title="{{ shell.last.step_label }} · {{ shell.last.title }}">
+          {{ icon('circle-check' if shell.last.state == 'ok' else ('circle-x' if shell.last.state == 'error' else 'history'), 14) }}
+          <span class="pill-text">Last run {% if shell.last.iso %}<time data-ago datetime="{{ shell.last.iso }}">{{ shell.last.when }}</time>{% else %}{{ shell.last.when }}{% endif %}</span></a>
+      {% endif %}
+
+      {% block headerextra %}{% endblock %}
+
+      <button type="button" class="btn-ghost btn-icon" id="thememenu-btn" data-menu="thememenu"
+              aria-label="Theme" title="Theme"><span class="theme-icon">{{ icon('monitor') }}</span></button>
+      <button type="button" class="switch btn-ghost" id="advtoggle" aria-pressed="false"
+              title="Show the extra detail researchers use: run history, raw fields, technical logs.">
+        <span class="track"></span>Technical details: <span class="adv-state">off</span></button>
+    </header>
+
+    <main id="main" tabindex="-1">{% block body %}{% endblock %}</main>
   </div>
-</header>
-<main>{% block body %}{% endblock %}</main>
-<script>
-  // auto -> light -> dark -> auto. "auto" is the absence of the attribute, so
-  // the media query takes over again rather than being frozen at a snapshot of
-  // whatever the OS happened to want when the reader last clicked.
-  (function () {
-    var order = ['system', 'light', 'dark'];
-    var btn = document.getElementById('themetoggle');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      var now = document.documentElement.dataset.theme || 'system';
-      var next = order[(order.indexOf(now) + 1) % order.length];
-      if (next === 'system') delete document.documentElement.dataset.theme;
-      else document.documentElement.dataset.theme = next;
-      try {
-        if (next === 'system') localStorage.removeItem('theme');
-        else localStorage.setItem('theme', next);
-      } catch (e) { /* not persisted, but the page still switches */ }
-    });
-  })();
-</script>
+</div>
+
+<div class="menu" id="thememenu" role="menu" hidden>
+  <button type="button" role="menuitemradio" data-theme-choice="light" aria-checked="false">{{ icon('sun') }} Light<span class="menu-check">{{ icon('check') }}</span></button>
+  <button type="button" role="menuitemradio" data-theme-choice="dark" aria-checked="false">{{ icon('moon') }} Dark<span class="menu-check">{{ icon('check') }}</span></button>
+  <button type="button" role="menuitemradio" data-theme-choice="system" aria-checked="false">{{ icon('monitor') }} System<span class="menu-check">{{ icon('check') }}</span></button>
+</div>
+<div class="toast-stack" aria-live="polite"></div>
+{# Icon markup for scripts (toasts, theme button), so paths live only in _icons.html. #}
+{% for n in ['circle-check', 'circle-x', 'triangle-alert', 'info', 'x', 'sun', 'moon', 'monitor', 'undo-2', 'trash-2'] %}
+<template id="ui-icon-{{ n }}">{{ icon(n) }}</template>
+{% endfor %}
+<script src="{{ url_for('static', filename='ui.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

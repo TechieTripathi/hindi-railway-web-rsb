@@ -1,0 +1,174 @@
+{#- Discard / Restore for every `.article-picker` on the page.
+
+    Shared by the panel's "Choose articles" step and the Advanced articles table.
+    A picker root carries:
+      data-api       POST endpoint (/api/selection/<pipeline>)
+      data-view      all | selected | excluded — which rows the list should show
+      data-discarded current discarded count
+      data-summary   e.g. "{selected} selected · {discarded} discarded"
+    Inside it, by class: .sel-row (with data-key), .sel-status, .row-toggle,
+    .article-pick, .select-visible, [data-selection-action], .restore-all,
+    .sel-summary, .view-empty, .article-table, .showing-count, .selection-error,
+    and optional .view-chip buttons (data-view) that filter in place, and an optional
+    .bulkbar (fixed bottom bar: .bulk-count, .bulk-clear) shown while rows are ticked.
+    For long lists: .text-filter (matches a row's data-text), .source-filter (matches
+    data-source), .preview-toggle (shows the .snip lines) and .view-chip .count badges.
+
+    The server's reply — every discarded key and both counts — is applied to all
+    rows, so the page can never disagree with what "Write stories" will use. -#}
+<script>
+(() => {
+  document.querySelectorAll('.article-picker').forEach(root => {
+    const $$ = sel => Array.from(root.querySelectorAll(sel));
+    const one = sel => root.querySelector(sel);
+    const rows = $$('.sel-row');
+    const picks = $$('.article-pick');
+    const all = one('.select-visible');
+    const bulk = $$('[data-selection-action]');
+    const restoreAll = one('.restore-all');
+    const summary = one('.sel-summary');
+    const empty = one('.view-empty');
+    const table = one('.article-table');
+    const showing = one('.showing-count');
+    const error = one('.selection-error');
+    const chips = $$('.view-chip');
+    const bar = one('.bulkbar');
+    const textBox = one('.text-filter');
+    const srcSel = one('.source-filter');
+    const previews = one('.preview-toggle');
+    let text = '', src = '';
+    const barCount = one('.bulk-count');
+    let view = root.dataset.view || 'all';
+    let discarded = parseInt(root.dataset.discarded, 10) || 0;
+    let saving = false;
+
+    const isDiscarded = tr => tr.classList.contains('article-excluded');
+    // Icon markup rendered once by _base.html (<template id="ui-icon-…">).
+    const iconHTML = name => (document.getElementById('ui-icon-' + name) || {}).innerHTML || '';
+    const matches = tr => (view === 'all' || (view === 'excluded') === isDiscarded(tr))
+      && (!text || (tr.dataset.text || '').includes(text))
+      && (!src || tr.dataset.source === src);
+    const visible = () => picks.filter(p => !p.closest('.sel-row').hidden);
+
+    function setRow(tr, off) {
+      tr.classList.toggle('article-excluded', off);
+      const status = tr.querySelector('.sel-status');
+      if (status) {
+        status.textContent = off ? 'Discarded — won’t be written' : 'Selected';
+        status.className = 'badge sel-status ' + (off ? 'badge-outline' : 'badge-success');
+        // In a long list a badge on every kept row is noise; mark only the exceptions.
+        if (root.hasAttribute('data-quiet')) status.hidden = !off;
+      }
+      const btn = tr.querySelector('.row-toggle');
+      if (btn) {
+        // Icon buttons (shadcn style) swap the icon; text buttons swap the word.
+        if (btn.classList.contains('icon-toggle')) btn.innerHTML = iconHTML(off ? 'undo-2' : 'trash-2');
+        else btn.textContent = off ? 'Restore' : 'Discard';
+        btn.setAttribute('aria-label', off ? 'Restore this article' : 'Discard this article');
+        btn.dataset.action = off ? 'include' : 'exclude';
+        btn.title = off ? 'Put this article back' : 'Leave this article out (you can restore it)';
+      }
+    }
+
+    function refresh() {
+      rows.forEach(tr => { tr.hidden = !matches(tr); });
+      const vis = visible();
+      const ticked = vis.filter(p => p.checked).length;
+      if (all) {
+        all.checked = vis.length > 0 && ticked === vis.length;
+        all.indeterminate = ticked > 0 && ticked < vis.length;
+        all.disabled = saving || vis.length === 0;
+      }
+      picks.forEach(p => { p.disabled = saving; });
+      rows.forEach(tr => { const b = tr.querySelector('.row-toggle'); if (b) b.disabled = saving; });
+      bulk.forEach(b => {
+        if (b === restoreAll) return;
+        // Inside the bottom bar the count is shown once, beside the buttons.
+        if (!b.closest('.bulkbar')) b.textContent = b.dataset.label + (ticked ? ' (' + ticked + ')' : '');
+        b.disabled = saving || ticked === 0;
+      });
+      if (restoreAll) {
+        restoreAll.hidden = discarded === 0;
+        (restoreAll.querySelector('.label') || restoreAll).textContent = 'Restore all (' + discarded + ')';
+        restoreAll.disabled = saving;
+      }
+      // The stylesheet highlights any [aria-current], so remove it rather than set "false".
+      picks.forEach(p => p.closest('.sel-row').classList.toggle('is-ticked', p.checked));
+      if (bar) {
+        bar.hidden = ticked === 0;
+        document.body.classList.toggle('has-bulkbar', ticked > 0);
+        if (barCount) barCount.textContent = ticked + ' ticked';
+      }
+      chips.forEach(c => c.dataset.view === view ? c.setAttribute('aria-current', 'page') : c.removeAttribute('aria-current'));
+      const nOff = rows.filter(isDiscarded).length;
+      const counts = {all: rows.length, selected: rows.length - nOff, excluded: nOff};
+      chips.forEach(c => { const n = c.querySelector('.count'); if (n) n.textContent = counts[c.dataset.view]; });
+      const shown = rows.filter(tr => !tr.hidden).length;
+      if (showing) showing.textContent = shown;
+      if (empty) empty.hidden = rows.length === 0 || shown > 0;
+      if (table) table.hidden = rows.length > 0 && shown === 0;
+    }
+
+    async function send(action, keys, quiet) {
+      saving = true;
+      if (error) error.hidden = true;
+      refresh();
+      try {
+        const response = await fetch(root.dataset.api, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({action: action, keys: keys})
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not save your choice.');
+        const off = new Set(result.excluded_keys);
+        rows.forEach(tr => setRow(tr, off.has(tr.dataset.key)));
+        picks.forEach(p => { p.checked = false; });
+        discarded = result.excluded;
+        if (summary) summary.textContent = (root.dataset.summary || '{selected} selected · {discarded} discarded')
+          .replace('{selected}', result.selected).replace('{discarded}', result.excluded);
+        root.dispatchEvent(new CustomEvent('selection-changed', {detail: result, bubbles: true}));
+        // Every change can be undone straight from its toast.
+        if (!quiet && window.ui && (action === 'exclude' || action === 'include' || action === 'clear_excluded')) {
+          const n = action === 'clear_excluded' ? 0 : keys.length;
+          const what = n === 1 ? 'Article' : (n ? n + ' articles' : 'All articles');
+          const undoKeys = action === 'clear_excluded' ? undoAll : keys;
+          ui.toast(action === 'exclude' ? what + ' discarded' : what + ' restored', {
+            tone: 'success', duration: 7000,
+            description: result.selected + ' selected · ' + result.excluded + ' discarded',
+            action: undoKeys.length ? {label: 'Undo', onClick: () =>
+              send(action === 'exclude' ? 'include' : 'exclude', undoKeys, true)} : null,
+          });
+        }
+      } catch (e) {
+        if (error) { error.textContent = e.message; error.hidden = false; }
+      } finally {
+        saving = false;
+        refresh();
+      }
+    }
+
+    picks.forEach(p => p.addEventListener('change', refresh));
+    if (all) all.addEventListener('change', () => {
+      visible().forEach(p => { p.checked = all.checked; });
+      refresh();
+    });
+    let undoAll = [];
+    bulk.forEach(button => button.addEventListener('click', () => {
+      // "Restore all" can be undone by discarding exactly what was discarded before.
+      undoAll = rows.filter(isDiscarded).map(tr => tr.dataset.key);
+      const keys = button === restoreAll ? [] : visible().filter(p => p.checked).map(p => p.value);
+      send(button.dataset.selectionAction, keys);
+    }));
+    one('.bulk-clear')?.addEventListener('click', () => { picks.forEach(p => { p.checked = false; }); refresh(); });
+    rows.forEach(tr => {
+      const btn = tr.querySelector('.row-toggle');
+      if (btn) btn.addEventListener('click', () => send(btn.dataset.action, [tr.dataset.key]));
+    });
+    chips.forEach(c => c.addEventListener('click', () => { view = c.dataset.view; refresh(); }));
+    textBox?.addEventListener('input', () => { text = textBox.value.trim().toLowerCase(); refresh(); });
+    srcSel?.addEventListener('change', () => { src = srcSel.value; refresh(); });
+    previews?.addEventListener('change', () => root.classList.toggle('show-previews', previews.checked));
+    refresh();
+  });
+})();
+</script>

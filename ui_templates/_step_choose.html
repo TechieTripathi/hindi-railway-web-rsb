@@ -1,0 +1,104 @@
+{#- Step 2 body: the articles found, each with Discard / Restore. Built for long
+    lists: filter by text or source, tick everything shown, act from the bottom bar.
+    The list scrolls inside its own box so Continue stays close. Uses the same
+    selection API and script as the Advanced table (_selection_script.html). -#}
+{% from '_icons.html' import icon %}
+{% set c = flow.counts %}
+<div class="step-body">
+  <div class="article-picker" data-quiet data-api="{{ url_for('api_selection', pipeline=pipeline) }}"
+       data-view="all" data-discarded="{{ c.discarded }}"
+       data-summary="{selected} selected · {discarded} discarded">
+    <p class="small dim" style="margin:0 0 12px">Discard what you don't want written. To drop many at once:
+      filter, tick the header box, discard. Nothing is deleted; every change can be undone.</p>
+
+    <div class="filterbar">
+      <span class="switcher" role="group" aria-label="Show">
+        <button type="button" class="chip view-chip" data-view="all">All <span class="count">{{ c.found }}</span></button>
+        <button type="button" class="chip view-chip" data-view="selected">{{ icon('circle-check', 14) }}Selected <span class="count">{{ c.selected }}</span></button>
+        <button type="button" class="chip view-chip" data-view="excluded">{{ icon('trash-2', 14) }}Discarded <span class="count">{{ c.discarded }}</span></button>
+      </span>
+      <label class="search">{{ icon('search') }}<span class="sr-only">Filter articles</span>
+        <input type="search" class="text-filter" placeholder="Filter by title or source"></label>
+      {% set groups = choose_rows|groupby('source_label') %}
+      {% if groups|length > 1 %}
+      <select class="source-filter" aria-label="Source">
+        <option value="">All sources ({{ groups|length }})</option>
+        {% for g in groups %}
+          <option value="{{ g.grouper }}">{{ g.grouper }} ({{ g.list|length }})</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <span class="spacer"></span>
+      <label class="small dim" style="display:inline-flex; gap:6px; align-items:center; cursor:pointer">
+        <input type="checkbox" class="preview-toggle"> Show previews</label>
+      <button type="button" class="btn-sm restore-all" data-selection-action="clear_excluded"
+              {% if not c.discarded %}hidden{% endif %}>{{ icon('undo-2') }}<span class="label">Restore all ({{ c.discarded }})</span></button>
+    </div>
+    <div class="callout callout-danger selection-error" role="alert" hidden></div>
+
+    <div class="small dim tabular" style="margin-bottom:6px">Showing <span class="showing-count">{{ choose_rows|length }}</span> of {{ choose_rows|length }}
+      · <strong class="sel-summary" style="color:var(--text)">{{ c.selected }} selected · {{ c.discarded }} discarded</strong></div>
+
+    <div class="empty view-empty" hidden>{{ icon('search', 24) }}
+      <div class="empty-title">No article matches</div>
+      <div class="empty-text">Try another filter, or show all articles.</div></div>
+
+    <div class="table-wrap table-scroll article-table">
+      <table class="table compact">
+        <thead>
+          <tr>
+            <th style="width:1%"><input class="select-visible" type="checkbox"
+                aria-label="Tick every article shown" title="Tick every article shown"></th>
+            <th>Article</th>
+            <th style="width:1%; white-space:nowrap">Source · date</th>
+            <th style="width:1%"></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in choose_rows %}
+          <tr class="sel-row {{ 'article-excluded' if r.excluded }}" data-key="{{ r.article_key }}"
+              data-source="{{ r.source_label }}" data-text="{{ (r.title ~ ' ' ~ r.source_label)|lower }}">
+            <td><input type="checkbox" class="article-pick" value="{{ r.article_key }}"
+                aria-label="Tick {{ r.title }}" title="Tick to discard or restore several at once"></td>
+            <td>
+              <div class="article-title clamp2" style="font-weight:500; line-height:1.45" title="{{ r.title }}">{{ r.title }}</div>
+              <div class="snip dim small clamp2" style="margin-top:2px">{{ r.snippet }}</div>
+              <div class="small" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+                <span class="badge sel-status {{ 'badge-outline' if r.excluded else 'badge-success' }}" {% if not r.excluded %}hidden{% endif %}
+                      style="margin-top:4px">{{ 'Discarded — won’t be written' if r.excluded else 'Selected' }}</span>
+                {% if r.short %}<span class="badge badge-warning" style="margin-top:4px" title="Less than 300 characters of text were read from this page.">{{ icon('triangle-alert', 14) }}text may be incomplete</span>{% endif %}
+                <span data-adv class="faint mono" style="margin-top:4px">{{ r.chars }} chars · {{ r.extractor or ('%.0f%% Devanagari'|format(r.body_hindi * 100) if r.body_hindi is not none else '—') }}</span>
+              </div>
+            </td>
+            <td class="small dim" style="white-space:nowrap">{{ r.source_label }}<div class="faint tabular">{{ r.date or '—' }}</div></td>
+            <td style="white-space:nowrap; text-align:right">
+              <button type="button" class="row-toggle icon-toggle" data-key="{{ r.article_key }}"
+                      data-action="{{ 'include' if r.excluded else 'exclude' }}"
+                      aria-label="{{ 'Restore this article' if r.excluded else 'Discard this article' }}"
+                      title="{{ 'Put this article back' if r.excluded else 'Leave this article out (you can restore it)' }}">{{ icon('undo-2' if r.excluded else 'trash-2') }}</button>
+              <a class="btn-sm btn-ghost btn-icon btn" href="/verify/{{ pipeline }}/{{ r.i }}?stage=crawl"
+                 title="Read this article" aria-label="Read {{ r.title }}">{{ icon('external-link') }}</a>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+      <a class="btn btn-primary sel-continue" href="?open=write{{ '&mode=' ~ flow.mode if flow.mode != 'story' }}"
+         {% if not c.selected %}aria-disabled="true"{% endif %}>
+        Continue with <span class="sel-continue-n">{{ c.selected }}</span> article{{ '' if c.selected == 1 else 's' }} →</a>
+      <span class="small warn sel-none" {% if c.selected %}hidden{% endif %}>You discarded every article — restore at least one to continue.</span>
+    </div>
+
+    {# Bulk actions, pinned to the bottom of the window while anything is ticked. #}
+    <div class="bulkbar" hidden>
+      <strong class="bulk-count tabular">0 ticked</strong>
+      <button type="button" class="btn-sm" data-selection-action="exclude" data-label="Discard">{{ icon('trash-2') }}Discard</button>
+      <button type="button" class="btn-sm" data-selection-action="include" data-label="Restore">{{ icon('undo-2') }}Restore</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn-sm btn-ghost bulk-clear">Clear</button>
+    </div>
+  </div>
+</div>

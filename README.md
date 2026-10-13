@@ -1,10 +1,12 @@
 # Hindi Railway News — Research
 
-Research pipelines for Hindi railway news. Two crawlers collect articles: one from six
-Hindi news publishers, the other from the official Indian Railways zone press-release
-portals (the Hindi editions). Claude rewrites each story bilingually, and every story is
-then scored against its source with deterministic checks, not by asking the model to grade
-itself. A small web control panel (`ui.py`) runs every step with one click.
+Research pipelines for Hindi railway news. Three pipelines collect articles: one from
+six Hindi news publishers, one from the official Indian Railways zone press-release
+portals (the Hindi editions), and one that searches the open web for the railway
+keywords you type (वंदे भारत, रेल हादसा …) and takes matching news from any publisher.
+Claude rewrites each story bilingually, and every story is then scored against its
+source with deterministic checks, not by asking the model to grade itself. A small web
+control panel (`ui.py`) runs every step with one click.
 
 This repo is self-contained. It runs on **Windows, macOS and Linux**, and needs nothing
 outside this folder.
@@ -17,7 +19,8 @@ outside this folder.
 |---|---|
 | **Python 3.9 or newer** | Tested on 3.9, 3.10, 3.12 and 3.13. 3.13 is recommended. |
 | **git** | To clone the repo. |
-| **An Anthropic API key** | Only for the "Write stories with AI" step. Crawling, scoring and the tests work without one. Get a key at [console.anthropic.com](https://console.anthropic.com/). |
+| **An Anthropic API key** | Only for the "Write stories" step. Crawling, scoring and the tests work without one. Get a key at [console.anthropic.com](https://console.anthropic.com/). |
+| **A Brave Search API key** *(optional)* | Only for keyword search, which also works without one using free Bing News results. Brave adds more and fresher results, billed per search. Get a key at [brave.com/search/api](https://brave.com/search/api/). |
 
 ---
 
@@ -152,6 +155,7 @@ Open `.env` in any text editor and fill in the key:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+BRAVE_API_KEY=...          # optional: keyword search via Brave News
 ```
 
 `.env` is gitignored, so the key is never committed. A key exported in your shell takes
@@ -162,7 +166,8 @@ python shared/config_env.py
 # ANTHROPIC_API_KEY  set, 108 chars  (.env)
 ```
 
-`BRAVE_API_KEY` in the template is not used by either pipeline. Leave it empty.
+`BRAVE_API_KEY` is optional. Without it, keyword search uses Bing News only and the
+control panel shows Brave as "will be skipped".
 
 ---
 
@@ -173,6 +178,7 @@ No network access and no API spend:
 ```bash
 python test_hindi_text.py                  # -> 10 passed, 0 failed
 python -m unittest test_article_selection  # -> Ran 14 tests ... OK
+python -m unittest test_keyword_search     # -> Ran 13 tests ... OK
 python shared/hindi_patches.py             # first line: Backend: indic-nlp-library
 ```
 
@@ -192,9 +198,20 @@ slightly less accurate. Re-run step 3.
 python ui.py
 ```
 
-Open **<http://127.0.0.1:5001>** in your browser. Pick a pipeline and run the steps in
-order. Nothing runs until you click, and only **"Write stories with AI"** uses your API
-key (and costs money). Everything is written to `output/`.
+Open **<http://127.0.0.1:5001>** in your browser and pick a source. Each one walks you
+through four steps, one at a time:
+
+1. **Find articles** — how recent, and (for keyword search) what to search for.
+2. **Choose articles** — discard anything you don't want; nothing is deleted.
+3. **Write stories** — the only paid step; it states the number of AI requests first.
+   A free quality check runs automatically when it finishes.
+4. **Review results** — each story with its quality numbers (facts kept, copied text),
+   and a side-by-side view against the original.
+
+Nothing runs until you click. In **keyword search**, each Brave search is also billed
+(Bing is free). Everything is written to `output/`. The **Technical details** switch at
+the top right shows the extra views researchers use: run history, the full articles
+table, how articles get combined, and raw logs.
 
 Stop the server with **Ctrl+C**. After editing any code, restart it — auto-reload is off
 on purpose.
@@ -254,10 +271,12 @@ network or API calls.
 ```
 web_search/        crawler for the six Hindi news publishers
 rsb_search/        crawler for the railway zone press-release portals (Hindi edition)
+keyword_search/    open-web keyword search (Brave News, Bing News RSS) for any publisher
 shared/            Hindi text handling, grounded scoring, API-key loading, run provenance
 vendor/            copies of the original webapp code this project builds on
 notebooks/         four research notebooks
 ui.py              the control panel (http://127.0.0.1:5001)
+ui_templates/      its pages; static/ holds its stylesheet, scripts, fonts and icons
 experiment.py      run a pipeline with config overrides into its own run folder
 docs/              full documentation
 output/            crawled data, AI output, scores, logs (gitignored, created on first run)

@@ -1,43 +1,46 @@
 {% extends "_base.html" %}
-{% block title %}Verify #{{ index }}{% endblock %}
-
-{% block headerextra %}
-<span class="faint tiny mono">{{ file }}</span>
-{% endblock %}
+{% block title %}Side by side{% endblock %}
 
 {% block body %}
-
-<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px">
-  <a href="/data/{{ pipeline }}?stage={{ stage }}" style="color:var(--accent)">← all articles</a>
-  <span class="dim small">{{ title }}</span>
-  {% for s in stages %}
-    {% if s.count %}
-      <a href="/verify/{{ pipeline }}/{{ index }}?stage={{ s.key }}" class="chip"
-         style="text-decoration:none;
-                color:{{ 'var(--accent)' if s.key == stage else 'var(--dim)' }};
-                border-color:{{ 'var(--accent-line)' if s.key == stage else 'var(--line)' }}">
-        {{ s.label }}</a>
-    {% endif %}
-  {% endfor %}
-  <span class="spacer"></span>
-  {% if index > 0 %}<a href="/verify/{{ pipeline }}/{{ index - 1 }}?stage={{ stage }}"
-     style="color:var(--accent)">← previous</a>{% else %}<span class="faint">← previous</span>{% endif %}
-  <span class="dim small">{{ index + 1 }} of {{ count }}</span>
-  {% if index + 1 < count %}<a href="/verify/{{ pipeline }}/{{ index + 1 }}?stage={{ stage }}"
-     style="color:var(--accent)">next →</a>{% else %}<span class="faint">next →</span>{% endif %}
-</div>
+{% from '_icons.html' import icon %}
+<header class="page-header">
+  <div style="min-width:0">
+    <h1>Side by side</h1>
+    <p class="lede">The original article on the left, what the AI wrote on the right. Hover any number for what it means.</p>
+    <div class="meta">
+      <span class="small dim">{{ title }} · {{ index + 1 }} of {{ count }}</span>
+      <span data-adv class="switcher">
+      {% for s in stages %}
+        {% if s.count %}
+          <a href="/verify/{{ pipeline }}/{{ index }}?stage={{ s.key }}" class="chip"
+             {% if s.key == stage %}aria-current="page"{% endif %}>{{ s.label }}</a>
+        {% endif %}
+      {% endfor %}
+      </span>
+      <span data-adv class="faint mono tiny">{{ file }}</span>
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-sm btn-ghost" href="/panel/{{ pipeline }}">{{ icon('arrow-left') }}Back to the panel</a>
+    {% if index > 0 %}<a class="btn btn-sm" href="/verify/{{ pipeline }}/{{ index - 1 }}?stage={{ stage }}">Previous</a>
+    {% else %}<button type="button" class="btn-sm" disabled>Previous</button>{% endif %}
+    {% if index + 1 < count %}<a class="btn btn-sm" href="/verify/{{ pipeline }}/{{ index + 1 }}?stage={{ stage }}">Next {{ icon('arrow-right') }}</a>
+    {% else %}<button type="button" class="btn-sm" disabled>Next</button>{% endif %}
+  </div>
+</header>
 
 <!-- ── scores ─────────────────────────────────────────────────────────────── -->
 <section class="panel" style="margin-bottom:16px">
   <div class="panel-head">
-    <strong>Scores</strong>
-    <span class="dim small">hover any figure for what it means · full definitions in
-      <a href="/scores">how the scores are calculated</a></span>
+    <strong>Quality</strong>
+    <span class="dim small">hover any number for what it means ·
+      <a href="/scores">how quality is measured</a></span>
   </div>
   <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
               gap:1px; background:var(--line)">
     {% for sc in scores %}
-    <div style="background:var(--panel); padding:12px 14px" title="{{ sc.hint }}">
+    <div style="background:var(--panel); padding:12px 14px" title="{{ sc.hint }}"
+         {% if sc.key in ['number_precision', 'grounding_ceiling'] %}data-adv{% endif %}>
       <div class="dim tiny">{{ sc.label }}</div>
       <div style="font-size:23px; font-weight:600; line-height:1.25"
            class="{{ sc.band if sc.band != 'none' else 'faint' }}">
@@ -51,8 +54,8 @@
   </div>
   {% if gate_failures %}
   <div style="padding:11px 14px; border-top:1px solid var(--line)" class="warn small">
-    <strong>⚠ {{ gate_failures|length }} gate failure(s)</strong> — these cap the trust
-    ceiling regardless of the model's own score:
+    <strong>⚠ Needs a closer look</strong> — {{ gate_failures|length }} automatic
+    check{{ 's' if gate_failures|length != 1 }} failed, whatever the AI says about itself:
     <ul style="margin:6px 0 0; padding-left:20px">
       {% for g in gate_failures %}<li>{{ g }}</li>{% endfor %}
     </ul>
@@ -74,7 +77,7 @@
   <!-- LEFT: the original source -->
   <section class="panel pane">
     <div class="panel-head" style="background:var(--panel2)">
-      <strong>① Original source</strong>
+      <strong>① Original article</strong>
       {% if source_parts|length > 1 %}
         <span class="chip" title="This report was merged from several articles. Each is headed separately below.">{{ source_parts|length }} sources</span>
       {% endif %}
@@ -89,21 +92,22 @@
         <span class="dim">article</span>
         <span><a href="{{ art.link }}" target="_blank" rel="noreferrer">{{ art.link }}</a></span>
         {% if listing %}
-        <span class="dim">found on</span>
-        <span><a href="{{ listing }}" target="_blank" rel="noreferrer"
+        <span class="dim" data-adv>found on</span>
+        <span data-adv><a href="{{ listing }}" target="_blank" rel="noreferrer"
            style="color:{{ 'var(--accent)' if listing_exact else 'var(--warn)' }}">{{ listing }}</a>
           {%- if not listing_exact %} <span class="warn tiny">(guessed)</span>{% endif %}</span>
         {% endif %}
         {% if art.extractor %}
-        <span class="dim">extracted by</span>
-        <span class="{{ 'warn' if art.extractor == 'generic' }}">{{ art.extractor }}
-          {%- if art.extractor == 'generic' %} — this site's selector has drifted{% endif %}</span>
+        <span class="dim" data-adv>extracted by</span>
+        {% set drift = art.extractor == 'generic' and not generic_expected %}
+        <span data-adv class="{{ 'warn' if drift }}">{{ art.extractor }}
+          {%- if drift %} — this site's selector has drifted{% endif %}</span>
         {% endif %}
         {# art is a plain dict: `art.missing_key is not none` is TRUE in Jinja,
            because Undefined is not None. Use .get() so absent fields skip. #}
         {% if art.get('body_hindi_ratio') is not none %}
-        <span class="dim">Devanagari</span>
-        <span class="{{ '' if art.get('is_hindi_body') else 'warn' }}">{{ '%.0f%%'|format(art.get('body_hindi_ratio') * 100) }} of the body</span>
+        <span class="dim" data-adv>Devanagari</span>
+        <span data-adv class="{{ '' if art.get('is_hindi_body') else 'warn' }}">{{ '%.0f%%'|format(art.get('body_hindi_ratio') * 100) }} of the body</span>
         {% endif %}
       </div>
     </div>
@@ -136,16 +140,13 @@
   <!-- RIGHT: the AI output -->
   <section class="panel pane">
     <div class="panel-head" style="background:var(--accent-soft)">
-      <strong style="color:var(--accent)">② AI generated</strong>
+      <strong style="color:var(--accent)">② What the AI wrote</strong>
       <span class="dim small">not verified — this is what you are checking</span>
     </div>
     {% if not has_ai %}
       <p class="dim" style="padding:16px; margin:0">
         No story generated for this article yet.
-        {% if stage == 'crawl' %}You are viewing the <strong>crawled</strong> stage —
-          switch to <em>AI generated</em> above, or run step 2 on the
-          <a href="/">control panel</a>.
-        {% else %}Run step 2 on the <a href="/">control panel</a>.{% endif %}
+        <a href="/panel/{{ pipeline }}?open=write">Write stories in step 3 →</a>
       </p>
     {% endif %}
     <div class="pane-scroll">

@@ -13,7 +13,7 @@ Run everything from the **repository root** — the folder holding `ui.py`.
 |---|---|
 | Python | **3.13.12** is what this checkout is verified on. The code uses `from __future__ import annotations`, so 3.9+ should work — untested. |
 | git | any recent version |
-| API keys | Anthropic (required for story generation). Brave is optional and unused by both pipelines. |
+| API keys | Anthropic (required for story generation). Brave Search (optional, for keyword search; without it Bing News is used). |
 
 ```bash
 python3 -V          # -> Python 3.13.12
@@ -103,6 +103,9 @@ git check-ignore -v .env
 .venv/bin/python3 -m unittest test_article_selection
 # -> Ran 14 tests ... OK
 
+.venv/bin/python3 -m unittest test_keyword_search
+# -> Ran 13 tests ... OK
+
 .venv/bin/python3 shared/hindi_patches.py
 # Backend: indic-nlp-library
 #   distinct dedup keys      2 -> 5   (of 5 titles)
@@ -133,10 +136,13 @@ If a corpus already exists under `output/`, this also works offline and is repea
 .venv/bin/python3 ui.py
 ```
 
-→ **http://127.0.0.1:5001** · run history at `/logs` · articles at `/data/web`
+→ **http://127.0.0.1:5001**. Pick a source, then follow its four steps: Find articles →
+Choose articles → Write stories (quality is checked automatically) → Review results. Turn
+on **Technical details** (top right) for run history (`/logs`), the full articles table
+(`/data/web`) and raw logs.
 
-It writes only under `output/`. Nothing runs until you click; only step 2 ("Write stories
-with AI") spends money. Port 5001 was chosen so it can run alongside the webapp's `app.py`
+It writes only under `output/`. Nothing runs until you click; only "Write stories" spends
+money. Port 5001 was chosen so it can run alongside the webapp's `app.py`
 on 5000, if you also have that checked out.
 
 > `debug=False` is deliberate — Flask's reloader imports the module twice and would
@@ -183,10 +189,11 @@ calls.
 ```
 research/                       <- this repo: TechieTripathi/hindi-railway-web-rsb
 ├── web_search/  rsb_search/      one folder per pipeline (config + pipeline)
+├── keyword_search/               third pipeline: open-web search by keyword
 ├── shared/                       Devanagari, patches, grounded metrics, key loading
 ├── vendor/                       copies of the webapp's engine, CRIS parsers, normalizers
 ├── notebooks/                    the four research notebooks
-├── ui.py  ui_templates/          control panel on :5001, drives both pipelines
+├── ui.py  ui_templates/          control panel on :5001, drives all three pipelines
 ├── experiment.py                 run either pipeline with config overrides
 ├── docs/                         all documentation (this file included)
 └── output/                       scraped corpora, scores, logs — gitignored

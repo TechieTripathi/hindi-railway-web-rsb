@@ -1,0 +1,8 @@
+{#- A status as an icon plus a word, from ui.STATUS_WORDS. Import "with context":
+      {% from '_status_badge.html' import status with context %}
+      {{ status('look') }}  ·  {{ status('ok', 'Written') }} -#}
+{% from '_icons.html' import icon %}
+{%- macro status(key, label=None, spin=False) -%}
+{%- set w = status_words.get(key) or {'label': key, 'tone': 'outline', 'icon': 'circle-help'} -%}
+<span class="badge badge-{{ w.tone }}">{{ icon(w.icon, 14, 'spinning' if spin or key == 'running' else '') }}{{ label or w.label }}</span>
+{%- endmacro %}
