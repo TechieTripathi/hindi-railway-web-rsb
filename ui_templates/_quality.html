@@ -1,0 +1,11 @@
+{#- The three quality numbers, as a reader sees them. Labels and colours come from
+    ui._quality, which shares its thresholds with the side-by-side page. -#}
+{#- The verdict (Looks fine / Needs a closer look / Not checked yet) is a separate
+    status badge; this macro only lays out the numbers. -#}
+{% macro quality(q) -%}
+  {%- if q.checked -%}
+    {%- for n in q.numbers %}
+    <span class="q {{ 'q-dim' if n.dim else 'q-' ~ n.band }}" title="{{ n.tip }}">{{ n.label }} <b>{{ n.display }}</b></span>
+    {%- endfor %}
+  {%- endif -%}
+{%- endmacro %}

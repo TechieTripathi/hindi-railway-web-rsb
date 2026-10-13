@@ -1,0 +1,293 @@
+{% extends "_base.html" %}
+{% block title %}{{ p.title }}{% endblock %}
+
+{% block headerextra %}{% endblock %}
+
+{% block body %}
+{% from '_icons.html' import icon %}
+{% from '_status_badge.html' import status with context %}
+{#- One source type as four guided steps. Exactly one step is open
+    (flow.focus); the others are one line each. ui._flow decides which. -#}
+{% set c = flow.counts %}
+<header class="page-header">
+  <div style="min-width:0">
+    <h1>{{ p.title }}</h1>
+    <p class="lede">{{ p.friendly }}</p>
+    <div class="meta small dim tabular">
+      {%- if c.found -%}
+        <span><b style="color:var(--text)">{{ c.found }}</b> found</span> ·
+        <span><b style="color:var(--text)">{{ c.selected }}</b> selected</span> ·
+        <span><b style="color:var(--text)">{{ c.written }}</b> written</span>
+        {%- if c.unchecked %} · <span class="warn"><b>{{ c.unchecked }}</b> not checked yet</span>{% endif -%}
+      {%- else -%}
+        <span>Nothing found yet — start with step 1.</span>
+      {%- endif -%}
+    </div>
+  </div>
+  <div class="actions">
+    <details class="tech" data-adv style="max-width:420px">
+      <summary>Why it works this way</summary>
+      <div class="tech-body" style="font-family:var(--font-sans)">{{ p.blurb }}</div>
+    </details>
+  </div>
+</header>
+
+<div class="stack" style="margin-bottom:16px">
+  {% if flow.busy_reason %}
+  <div class="callout callout-info busy-note" role="status">{{ icon('loader-circle', 16, 'spinning') }}
+    <div class="callout-text"><b>Busy.</b> {{ flow.busy_reason }}</div></div>
+  {% endif %}
+  {% if not key.set %}
+  <div class="callout callout-warning" role="status">{{ icon('key-round') }}
+    <div class="callout-text"><b>No Anthropic API key.</b> Finding and choosing articles work; writing
+      stories needs ANTHROPIC_API_KEY in the research folder's .env (then restart the panel).</div></div>
+  {% endif %}
+</div>
+
+{% set STEP_ICONS = {'find': 'search', 'choose': 'list-checks', 'write': 'square-pen', 'review': 'circle-check'} %}
+<div>
+{% for key_ in ['find', 'choose', 'write', 'review'] %}
+  {% set st = flow.steps[key_] %}
+  {% set open = flow.focus == key_ %}
+  <section class="fstep {{ 'is-open' if open }} {{ 'is-done' if st.status == 'done' }} {{ 'is-locked' if st.lock }}"
+           id="step-{{ key_ }}">
+    <div class="step-head">
+      <span class="step-num" aria-hidden="true">{{ icon('check', 16) if st.status == 'done' and not open else st.n }}</span>
+      <div style="flex:1; min-width:0">
+        <div class="step-title" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          {{ icon(STEP_ICONS[key_], 16, 'faint') }}{{ st.title }}
+          {% if st.status == 'running' %}{{ status('running') }}
+          {% elif st.lock %}{{ status('locked') }}
+          {% elif st.status == 'partial' %}{{ status('partial') }}
+          {% elif st.status == 'done' and not open %}{{ status('done') }}{% endif %}
+        </div>
+        {% if not open %}
+          <div class="small {{ 'faint' if st.lock else 'dim' }}" style="margin-top:2px">{{ st.lock or st.summary or st.message }}</div>
+        {% endif %}
+      </div>
+      {% if not open and not st.lock %}
+        <a class="btn btn-sm" href="?open={{ key_ }}{{ '&mode=' ~ flow.mode if flow.mode != 'story' }}">{{ 'Change' if st.status in ['done', 'partial'] else 'Open' }}</a>
+      {% endif %}
+    </div>
+    {% if open %}
+      {% if key_ == 'find' %}{% include '_step_find.html' %}
+      {% elif key_ == 'choose' %}{% include '_step_choose.html' %}
+      {% elif key_ == 'write' %}{% include '_step_write.html' %}
+      {% else %}{% include '_step_review.html' %}{% endif %}
+    {% endif %}
+  </section>
+{% endfor %}
+</div>
+
+{% if flow.focus == 'choose' %}{% include '_selection_script.html' %}{% endif %}
+
+<script>
+(() => {
+  const PIPELINE = {{ pipeline|tojson }};
+  const BARE_URL = '/panel/' + PIPELINE;
+  const scope = document.querySelector('.run-scope');
+  const box = scope && scope.querySelector('.runbox');
+  const esc = s => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+
+  // ---- run parameters: every [data-param] in the open step, plus its picker.
+  function params() {
+    const out = {};
+    if (!scope) return out;
+    scope.querySelectorAll('[data-param]').forEach(el => {
+      if (el.type !== 'checkbox') out[el.dataset.param] = el.value;
+      // A checkbox that stands for a choice sends its value ("narrow" / "only").
+      else out[el.dataset.param] = 'on' in el.dataset ? (el.checked ? el.dataset.on : el.dataset.off) : el.checked;
+    });
+    const picks = [...scope.querySelectorAll('input.pick')];
+    if (picks.length) {
+      const chosen = picks.filter(c => c.checked).map(c => c.dataset.value);
+      // Sent only when it differs from "everything", so an untouched picker
+      // keeps the pipeline on its default.
+      if (chosen.length && chosen.length !== picks.length) out.sources = chosen;
+      else if (!chosen.length) out.sources = [];
+    }
+    return out;
+  }
+
+  // ---- step 1 option controls
+  if (scope) {
+    // Suggestion chips add their keyword to the search box (once).
+    const kw = scope.querySelector('.kw-input');
+    scope.querySelectorAll('.kw-suggest').forEach(b => b.addEventListener('click', () => {
+      const have = kw.value.split(',').map(t => t.trim()).filter(Boolean);
+      if (!have.includes(b.textContent.trim())) have.push(b.textContent.trim());
+      kw.value = have.join(', ');
+      kw.focus();
+    }));
+    const picks = [...scope.querySelectorAll('input.pick')];
+    const count = scope.querySelector('.pick-count');
+    const recount = () => { if (count) count.textContent = picks.filter(c => c.checked).length + ' of ' + picks.length; };
+    const set = fn => { picks.forEach(fn); recount(); };
+    scope.querySelector('.pick-all')?.addEventListener('click', () => set(c => c.checked = true));
+    scope.querySelector('.pick-none')?.addEventListener('click', () => set(c => c.checked = false));
+    scope.querySelector('.pick-reset')?.addEventListener('click', () => set(c => c.checked = c.dataset.default === '1'));
+    picks.forEach(c => c.addEventListener('change', recount));
+    const capT = scope.querySelector('.cap-toggle'), capN = scope.querySelector('.cap-number'),
+          capNote = scope.querySelector('.cap-note');
+    capT?.addEventListener('change', () => {
+      if (capN) capN.disabled = !capT.checked;
+      if (capNote) capNote.textContent = capT.checked ? 'At most this many.' : 'No limit — takes everything in the time range.';
+    });
+  }
+
+  // ---- step 3 estimate, following "Combine articles?"
+  const est = document.querySelector('.write-estimate');
+  const modeSel = document.querySelector('.mode-select');
+  const writeBtn = document.querySelector('.write-btn');
+  function refreshEstimate() {
+    if (!est || !modeSel) return;
+    const m = modeSel.value;
+    const counts = JSON.parse(est.dataset.counts), calls = JSON.parse(est.dataset.calls),
+          skipped = JSON.parse(est.dataset.skipped), total = parseInt(est.dataset.total, 10) || 0;
+    const n = counts[m], c = calls[m], k = skipped[m];
+    const plural = (x, one, many) => x + ' ' + (x === 1 ? one : many);
+    if (!c) {
+      est.innerHTML = 'All <strong>' + plural(n, 'story', 'stories') + '</strong> for these articles are already written — nothing to pay for.';
+    } else {
+      est.innerHTML = 'Writes <strong>' + plural(c, 'story', 'stories') + '</strong> from '
+        + plural(total, 'selected article', 'selected articles')
+        + ' · about <strong>' + plural(c, 'paid AI request', 'paid AI requests') + '</strong>'
+        + ' (up to ' + (2 * c) + ' if some need a retry)'
+        + (k ? ' · ' + k + ' already written, skipped free' : '');
+    }
+    if (writeBtn) {
+      writeBtn.textContent = c ? 'Write ' + plural(c, 'story', 'stories') : 'Nothing new to write';
+      writeBtn.dataset.calls = c;
+      if (!c) writeBtn.disabled = true;
+    }
+    const opt = modeSel.options[modeSel.selectedIndex];
+    const hint = document.querySelector('.mode-hint');
+    if (hint) hint.textContent = opt ? opt.dataset.hint : '';
+    const label = document.querySelector('.mode-label');
+    if (label && opt) label.textContent = opt.textContent;
+    const preview = document.querySelector('.mode-preview');
+    if (preview) preview.href = '/clusters/' + PIPELINE + '?mode=' + m;
+  }
+  modeSel?.addEventListener('change', refreshEstimate);
+  refreshEstimate();
+
+  // ---- step 2: keep "Continue with N articles" in step with Discard/Restore
+  document.addEventListener('selection-changed', ev => {
+    const n = ev.detail.selected;
+    const btn = document.querySelector('.sel-continue');
+    if (btn) {
+      btn.querySelector('.sel-continue-n').textContent = n;
+      btn.lastChild.textContent = ' article' + (n === 1 ? '' : 's') + ' →';
+      btn.style.pointerEvents = n ? '' : 'none';
+      btn.style.opacity = n ? '' : '.5';
+      btn.setAttribute('aria-disabled', n ? 'false' : 'true');
+    }
+    document.querySelector('.sel-none')?.toggleAttribute('hidden', n > 0);
+  });
+
+  // ---- step 4: "Needs a closer look" filter
+  document.querySelectorAll('.look-chip').forEach(chip => chip.addEventListener('click', () => {
+    const only = chip.dataset.look === 'look';
+    document.querySelectorAll('.look-chip').forEach(c => c === chip ? c.setAttribute('aria-current', 'page') : c.removeAttribute('aria-current'));
+    document.querySelectorAll('.review-row').forEach(r => { r.hidden = only && r.dataset.look !== '1'; });
+  }));
+
+  // ---- running a step
+  let jobId = null, offset = 0, poll = null;
+  const q = sel => box && box.querySelector(sel);
+
+  function attach(id) {
+    jobId = id; offset = 0;
+    if (!box) return;
+    box.hidden = false;
+    q('.run-log').textContent = '';
+    q('.run-result').textContent = '';
+    document.querySelectorAll('.run-btn').forEach(b => b.disabled = true);
+    clearInterval(poll);
+    poll = setInterval(tick, 700);
+    tick();
+  }
+
+  async function tick() {
+    if (!jobId) return;
+    const j = await (await fetch('/api/log/' + jobId + '?offset=' + offset)).json();
+    if (j.lines && j.lines.length) {
+      const log = q('.run-log');
+      log.textContent += j.lines.join('\n') + '\n';
+      log.scrollTop = log.scrollHeight;
+      offset = j.offset;
+    }
+    const pr = j.progress || {};
+    const bar = q('.bar');
+    let phase = pr.phase || 'Working…';
+    if (pr.stage === 'check') phase = 'Checking quality (free)…';
+    else if (j.pipeline && /^writing story/.test(phase) && pr.total) phase = 'Writing story ' + pr.done + ' of ' + pr.total + '…';
+    q('.run-phase').innerHTML = (j.state === 'running' ? '<span class="spin"></span> ' : '') + esc(phase.charAt(0).toUpperCase() + phase.slice(1));
+    q('.run-kept').textContent = pr.kept ? pr.kept + ' kept' : '';
+    q('.run-skipped').textContent = pr.skipped ? pr.skipped + ' skipped (off-topic, too old or too short)' : '';
+    q('.run-elapsed').textContent = j.elapsed ? j.elapsed + 's' : '';
+    if (pr.total && pr.stage !== 'check') {
+      bar.classList.remove('indet');
+      bar.firstChild.style.width = Math.round(100 * pr.done / pr.total) + '%';
+    }
+    if (j.log_name) q('.run-history').href = '/logs?f=' + encodeURIComponent(j.log_name);
+    if (j.state !== 'running') {
+      clearInterval(poll); poll = null;
+      bar.classList.remove('indet');
+      bar.firstChild.style.width = '100%';
+      const good = j.state === 'ok';
+      q('.run-phase').innerHTML = good ? '<span class="ok">✓ Done</span>' : '<span class="err">✕ Stopped with an error</span>';
+      q('.run-result').innerHTML = good ? '<span class="dim">Moving on…</span>'
+        : '<span class="err">' + esc(j.message || 'Something went wrong.') + '</span>';
+      // Shown as a toast on the page we land on (see ui.js "flash").
+      const DONE = {crawl: 'Articles found', generate: 'Stories written and quality-checked', score: 'Quality checked'};
+      try {
+        sessionStorage.setItem('ui.flash', JSON.stringify(good
+          ? {title: DONE[j.step] || 'Done', tone: 'success'}
+          : {title: 'Stopped with an error', tone: 'danger', description: j.message || ''}));
+      } catch (e) {}
+      // The server decides which step to open next, so drop any ?open=.
+      setTimeout(() => { location.href = BARE_URL; }, good ? 900 : 2500);
+    }
+  }
+
+  document.querySelectorAll('.run-btn').forEach(btn => btn.addEventListener('click', async () => {
+    if (btn.dataset.confirm && !(await ui.confirm({
+          title: 'Find articles again?', body: btn.dataset.confirm, confirm: 'Find again', tone: 'danger'}))) return;
+    if (btn.dataset.money === '1') {
+      const n = btn.dataset.calls || '?';
+      const plural = n === '1' ? '' : 's';
+      if (!(await ui.confirm({
+            title: 'Write ' + n + ' stor' + (n === '1' ? 'y' : 'ies') + '?',
+            body: 'This sends about ' + n + ' paid AI request' + plural + ' to Claude, billed to your '
+                  + 'Anthropic account.\n\nStories already written are skipped and not charged again. '
+                  + 'A free quality check runs afterwards.',
+            confirm: 'Write ' + n + ' stor' + (n === '1' ? 'y' : 'ies')}))) return;
+    }
+    const r = await fetch('/run/' + PIPELINE + '/' + btn.dataset.step, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(params()),
+    });
+    const j = await r.json();
+    if (j.error) {
+      if (box) { box.hidden = false; q('.run-phase').innerHTML = '<span class="err">' + esc(j.error) + '</span>'; q('.bar').hidden = true; }
+      else alert(j.error);
+      return;
+    }
+    attach(j.job_id);
+  }));
+
+  // ---- on load: follow a job already running here; wait out one running elsewhere
+  (async () => {
+    const s = await (await fetch('/api/state?pipeline=' + encodeURIComponent(PIPELINE))).json();
+    if (s.current && s.current_pipeline === PIPELINE) attach(s.current);
+    else if (s.current) {
+      const wait = setInterval(async () => {
+        const t = await (await fetch('/api/state?pipeline=' + encodeURIComponent(PIPELINE))).json();
+        if (!t.current) { clearInterval(wait); location.reload(); }
+      }, 3000);
+    }
+  })();
+})();
+</script>
+{% endblock %}

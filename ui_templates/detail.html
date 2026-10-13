@@ -47,7 +47,7 @@
 
   <section class="panel pane">
     <div class="panel-head" style="background:var(--panel2)">
-      <strong>Original source</strong>
+      <strong>Original article</strong>
       <span class="dim small">what was actually published</span>
     </div>
     {% if not source_texts %}
@@ -67,13 +67,13 @@
 
   <section class="panel pane">
     <div class="panel-head" style="background:var(--accent-soft)">
-      <strong style="color:var(--accent)">AI generated</strong>
+      <strong style="color:var(--accent)">What the AI wrote</strong>
       <span class="dim small">not verified — compare against the left</span>
     </div>
     {% if not ai_texts %}
       <p class="dim" style="padding:16px; margin:0">
-        No story generated for this article yet. Run step 2 on the
-        <a href="/">control panel</a>.
+        No story written for this article yet.
+        <a href="/panel/{{ pipeline }}?open=write">Write stories in step 3 →</a>
       </p>
     {% endif %}
     <div class="pane-scroll">

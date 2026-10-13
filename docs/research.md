@@ -38,12 +38,16 @@ research/
 ├── rsb_search/          official press releases, Hindi edition
 │   ├── config.py        zone URLs, per-zone limits, measured Hindi coverage
 │   └── pipeline.py      the crawling logic
-├── shared/              everything BOTH pipelines need
+├── keyword_search/      open-web news search by keyword, any publisher
+│   ├── config.py        engines, endpoints, default keywords, limits
+│   ├── engines.py       Brave News API, Bing News RSS — one hit shape
+│   └── pipeline.py      search → fetch body → filter → write
+├── shared/              everything the pipelines share
 │   ├── hindi_text.py    Devanagari normalising, tokenising, relevance
 │   ├── hindi_patches.py rebinds vendor/'s Latin-only normalizers at runtime
 │   ├── grounding.py     deterministic, source-checked scores
 │   ├── score_report.py  applies grounding to an engine output file
-│   ├── config_env.py    where the ANTHROPIC_API_KEY comes from
+│   ├── config_env.py    where the API keys come from
 │   └── provenance.py    git hash / config snapshot for a run
 ├── vendor/              snapshot of the webapp code research builds on
 │   ├── engine.py        AI generation (Claude), verbatim but for one import
@@ -51,8 +55,8 @@ research/
 │   ├── dedup.py, web_agent.py   the webapp's Latin-only normalizers — the baseline
 │   └── config.py        the settings those modules read
 ├── notebooks/           the four research notebooks
-├── ui.py, ui_templates/ control panel driving BOTH pipelines, on :5001
-├── experiment.py        run either pipeline with overrides, into a stamped run dir
+├── ui.py, ui_templates/ control panel driving all three pipelines, on :5001
+├── experiment.py        run any pipeline with overrides, into a stamped run dir
 ├── docs/                all documentation
 ├── output/              scraped corpora, scores, logs, backups   (gitignored)
 └── hindi_railway_sources.json    both source groups, one file
@@ -265,6 +269,46 @@ language. Hindi coverage is very uneven — see
 
 ---
 
+### `keyword_search/pipeline.py` — open-web news search by keyword
+
+The other two pipelines read a fixed list of pages. This one takes the user's keywords,
+asks news search engines for matching articles from **any** publisher, and hands the
+results to the web pipeline's own code: `extract_body` for the text, `passes_topic` for
+relevance (so the keyword box means the same thing here), the shared date window. The
+output uses the web pipeline's article schema plus `search_keyword` and `search_engine`,
+so generation, scoring and the control panel need no special handling.
+
+```
+keyword × engine → result URLs → drop aggregators / seen URLs / seen titles / too old
+                 → extract_body → length, topic, date checks → article
+```
+
+Engines, measured 2026-10-12 with the query `रेलवे`:
+
+| engine | endpoint | key | measured |
+|---|---|---|---|
+| Brave News API | `api.search.brave.com/res/v1/news/search` (`country=IN`, `search_lang=hi`, `freshness`) | `BRAVE_API_KEY`, billed per search | 10 Hindi results, most under an hour old, direct publisher URLs |
+| Bing News RSS | `bing.com/news/search?format=rss&setlang=hi&cc=IN` | none | ~10 results; real URL is the `url=` parameter of Bing's click-through link, decoded locally. `extract_body` got full bodies for 7 of 8 |
+| GDELT DOC 2.0 | `api.gdeltproject.org/api/v2/doc/doc` | none | **not used** — refused every request here ("one every 5 seconds") |
+| Google News RSS | — | none | **not used** — encrypted redirects, 0 of 18 Hindi URLs resolved |
+
+Without a Brave key the run uses Bing alone and logs that Brave was skipped. Results
+from `msn.com` and similar aggregators are dropped before fetching (JavaScript shells
+with no extractable body). Most open-web publishers have no dedicated selector, so the
+generic `<p>` sweep is the normal path here, and the control panel does not flag it as
+selector drift.
+
+```python
+from keyword_search import pipeline as kp
+kp.run_keyword_search(["वंदे भारत", "रेल हादसा"], days=3)     # empty list -> DEFAULT_KEYWORDS
+```
+
+A one-keyword trial run (`वंदे भारत`, 3 days, both engines) kept 14 articles from 12
+publishers, all with bodies over 300 characters; it dropped 6 off-topic results, 4
+aggregator links and 3 out-of-window stories.
+
+---
+
 ### `shared/grounding.py` + `shared/score_report.py` — deterministic quality scores
 
 `fact_score`, `impact_level` and `topics` are all produced by the same Claude call that
@@ -309,26 +353,45 @@ byte-identical.
 .venv/bin/python3 ui.py                 # http://127.0.0.1:5001
 ```
 
-Port 5001, so it runs alongside the webapp's `app.py` on 5000. Two panels, one per
-pipeline, each with three stages you click **one at a time**:
+Port 5001, so it runs alongside the webapp's `app.py` on 5000. The home page offers one
+card per source type; each opens a page of **four guided steps**, only one of them open
+at a time:
 
 ```
-1 Fetch articles  ->  2 Write stories with AI  ->  3 Check quality
+1 Find articles  ->  2 Choose articles  ->  3 Write stories (+ automatic quality check)  ->  4 Review results
 ```
 
-**Written for someone who did not build this.** Every stage carries a plain-language
-description, how long it takes, and what it produces; the terse technical rationale is
-behind a "Why it works this way" disclosure. The stage that should be clicked next is
-highlighted and labelled *do this next*; a stage whose prerequisite is missing is disabled
-and says which step to do first. Step 2 is badged **costs money** and asks for confirmation
-before calling the API. A dismissible three-step explainer sits at the top (remembered in
-`localStorage`).
+**Written for someone who did not build this.** `ui._flow()` decides which step is open
+from the files on disk and run history: nothing found → Find; found but nothing written →
+Choose (discard inline); partly written → Write; otherwise Review. Finished steps collapse
+to one line with **Change**. Write is labelled **Paid step**, states the number of paid AI
+requests for the chosen way of combining articles, and asks for confirmation. Writing and
+the free quality check run as **one job** (`_step_write_and_check`); a failed check never
+fails the paid write. Review shows the three quality numbers in plain words — *Facts kept*
+(coverage), *Copied text* (plagiarism, lower is better), *AI's self-rating* (unverified) —
+and flags stories that **need a closer look** (a failed gate, or a number in the red).
 
-While a stage runs, the panel shows a progress bar, the current phase ("reading Amar
-Ujala", "writing story for …"), and running counts of kept / skipped / worth-a-look. Those
+**Look.** The design follows the Blinkit Campaign Console: its colour tokens (light and
+dark), a dark collapsible sidebar (Ctrl+B; a drawer on phones), a 56px header with
+breadcrumbs and a status pill, status badges that always pair an icon with a word,
+callouts, toasts with Undo, in-page confirm dialogs and a bottom bar for bulk actions.
+Everything is plain CSS and JavaScript in `static/` (`ui.css`, `ui.js`,
+`theme-init.js`), with no build step. Fonts are self-hosted in `static/fonts/` (Inter,
+JetBrains Mono, and Noto Sans Devanagari, because Inter has no Hindi glyphs). Lucide
+icons are inlined by the `_icons.html` macro. Statuses come from one map,
+`ui.STATUS_WORDS`.
+
+**Technical details** (header switch, off by default, remembered in `localStorage`) shows
+everything researchers use: run history, the full articles table, the story-grouping
+preview, extractor / character counts, and the raw log. Technical elements carry
+`data-adv` and one CSS rule hides them, so the server renders a single page for both
+audiences and every old URL still works.
+
+While a step runs, its card shows a progress bar and one plain sentence ("Writing story 3
+of 12…", then "Checking quality (free)…"), with running counts of kept / skipped. Those
 come from parsing the stage's own stdout — the crawlers already print exactly what a
-progress bar needs, so nothing had to be instrumented. The log has two views: **Key lines**
-(default) and **Everything**.
+progress bar needs, so nothing had to be instrumented. The raw output is under
+*Technical log*.
 
 **Why stage-by-stage.** The interesting failures in both pipelines are *silent* and live
 in a stage's stdout, not its return value:
@@ -347,14 +410,14 @@ a count of bodies under 300 chars — and every generate reports how many articl
 
 | | |
 |---|---|
-| Stage gating | Step 2 needs step 1; step 3 needs step 2. Disabled buttons say which step to do first |
+| Step gating | A locked step says what it is waiting for ("Find articles first", "No Anthropic API key found …") |
 | One at a time | A second POST while a stage runs gets `409`, so the stdout tee is unambiguous |
 | Params | web: articles per publisher · rsb: releases per zone, `hindi_only` |
 | Key badge | shows length and which source won — never the key |
 | Crawl backup | `run_*_crawl` opens the output with `"w"`. The UI copies the existing crawl to `output/backups/<name>.<stamp>.json` first, keeping the last 10 |
 | Scope | writes only `research/output/`; applies `apply_hindi_patches()` at startup |
 
-`/data/<web|rsb>` is the **data table**, linked from each stage once it has output:
+`/data/<pipeline>` is the **full articles table** (a Technical details view):
 
 | column | |
 |---|---|
@@ -444,6 +507,7 @@ Everything lands in `research/output/`:
 ```
 web_crawl_output_research.json      rsb_crawl_output_research.json      # Stage 1, scraped
 web_agency_output_research.json     rsb_agency_output_research.json     # Stage 2, + AI fields
+search_crawl_output_research.json   search_agency_output_research.json  # keyword search, same stages
 *_scored.json                                                           # Stage 4, + grounded fields
 *_pipeline_status_research.json                                         # progress, not data
 

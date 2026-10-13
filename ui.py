@@ -44,6 +44,8 @@ from flask import Flask, jsonify, render_template, request
 
 from vendor import engine                            # the webapp's, vendored
 
+from keyword_search import config as config_search
+from keyword_search import pipeline as search_pipeline
 from rsb_search import config as config_rsb
 from rsb_search import pipeline as rsb_pipeline
 from shared import cluster as clustering
@@ -167,8 +169,10 @@ class Job:
                 "id": self.id, "state": self.state, "offset": len(self.lines),
                 "lines": self.lines[offset:], "summary": self.summary,
                 "error": self.error, "log_name": self.log_name,
+                "message": _plain_error(self.error),
                 "progress": dict(self.progress),
                 "step_label": STEP_META[self.step]["label"],
+                "step": self.step,
                 "pipeline": self.pipeline,
                 "elapsed": round(((self.finished or _dt.datetime.now())
                                   - self.started).total_seconds(), 1),
@@ -216,6 +220,10 @@ def _run_brief_from_disk(log_name: str) -> dict:
         with open(_run_meta_path(log_name), encoding="utf-8") as fh:
             b = json.load(fh)
             b.setdefault("log_name", log_name)
+            # Sidecars store the label current at the time ("Fetch articles");
+            # history should read in today's words.
+            if b.get("step") in STEP_META:
+                b["step_label"] = STEP_META[b["step"]]["label"]
             return b
     except (OSError, ValueError):
         pass
@@ -286,7 +294,7 @@ def _run_async(pipeline: str, step: str, params: dict) -> Job:
         # A crawl visits one source/zone per "=== … ===" line, so the count of
         # configured sources is the denominator the progress bar needs. Generate
         # prints its own "i/total"; score is too fast to bother.
-        job.progress["total"] = _crawl_units(pipeline)
+        job.progress["total"] = _crawl_units(pipeline, params)
     JOBS[job.id] = job
     JOB_ORDER.insert(0, job.id)
 
@@ -384,13 +392,17 @@ def _backup(path: str, job: "Job | None") -> None:
 #: silently crawled with the web pipeline's source list.
 #:
 #:   source_kind         how `_selectable` lists what can be crawled
-#:                       ("publishers" | "zones"; add a branch for a new kind)
+#:                       ("publishers" | "zones" | "engines"; add a branch for a new kind)
+#:   keyword_copy        optional label/placeholder/hint for the keyword box
+#:   select_label        optional heading for the source picker
+#:   generic_expected    True when the generic body extractor is normal, not drift
+#:   keywords_primary    True when keywords are the search itself (shown up front)
 #:   source_word_plural  the noun the UI uses for those units
 #:   number              display order on the landing page
 #:   icon                one glyph, so the cards can be told apart at a glance
 PIPELINES = {
     "web": {
-        "number": 1, "icon": "📰",
+        "number": 1, "icon": "📰", "short": "News publishers",
         "source_kind": "publishers", "source_word_plural": "publishers",
         "title": "Hindi news publishers",
         "friendly": "Railway news in Hindi from six publishers — AajTak, Jansatta, "
@@ -412,7 +424,7 @@ PIPELINES = {
         ],
     },
     "rsb": {
-        "number": 2, "icon": "🏛️",
+        "number": 2, "icon": "🏛️", "short": "Press releases",
         "source_kind": "zones", "source_word_plural": "zones",
         "title": "Official railway press releases",
         "friendly": "Press releases straight from Indian Railways' own zone websites, "
@@ -432,6 +444,51 @@ PIPELINES = {
              "type": "checkbox", "default": config_rsb.HINDI_ONLY},
         ],
     },
+    "search": {
+        "number": 3, "icon": "🔎", "short": "Keyword search",
+        "source_kind": "engines", "source_word_plural": "search engines",
+        "select_label": "search engines to use",
+        # Open-web results come from publishers with no dedicated selector, so the
+        # generic <p> sweep is the normal path here, not a sign of selector drift.
+        "generic_expected": True,
+        # The keywords ARE the search, so the box sits in step 1 itself rather
+        # than under "More options" as a filter.
+        "keywords_primary": True,
+        "title": "Keyword search across the web",
+        "friendly": "Type railway keywords — वंदे भारत, रेल हादसा — and collect matching "
+                    "Hindi news from any publisher, not just a fixed list.",
+        "step_what": {"crawl": "Searches every keyword on the chosen search engines, then "
+                               "downloads the full text of each result. Bing is free; "
+                               "each Brave search is billed to your Brave API key."},
+        "blurb": "Brave News and Bing News RSS return direct publisher links — unlike "
+                 "Google News, whose encrypted redirects resolved for 0 of 18 Hindi "
+                 "articles. Text extraction, the railway test and the date window are "
+                 "the publisher pipeline's own.",
+        "cfg": config_search,
+        "keyword_copy": {
+            "label": "Search for",
+            "placeholder": "e.g. वंदे भारत, रेल हादसा, irctc",
+            "hint": "Comma-separated; each keyword is one search per engine. Leave empty "
+                    "to search " + ", ".join(config_search.DEFAULT_KEYWORDS) + ".",
+            # Shown as click-to-add chips under the box instead of the long hint.
+            "suggestions": list(config_search.DEFAULT_KEYWORDS),
+        },
+        "params": [
+            {"type": "cap", "toggle_key": "limit_on", "number_key": "max_per_keyword",
+             "label": "Limit how many per keyword", "unit": "per keyword",
+             "toggle_default": config_search.LIMIT_PER_KEYWORD,
+             "number_default": config_search.MAX_PER_KEYWORD},
+        ],
+    },
+}
+
+#: Copy for the keyword box on pipelines that FILTER by keyword. A pipeline that
+#: searches by keyword overrides it with its own `keyword_copy`.
+DEFAULT_KEYWORD_COPY = {
+    "label": "Only articles mentioning",
+    "placeholder": "e.g. वंदे भारत, दुर्घटना, irctc",
+    "hint": "Comma-separated. Hindi word endings are handled, so <code>रेलगाड़ी</code> "
+            "also matches <code>रेलगाड़ियों</code>. Leave empty to collect all railway news.",
 }
 
 
@@ -442,9 +499,9 @@ PIPELINES = {
 STEP_META = {
     "crawl": {
         "n": 1,
-        "label": "Fetch articles",
-        "button": "Fetch",
-        "verb": "Fetching…",
+        "label": "Find articles",
+        "button": "Find articles",
+        "verb": "Finding articles…",
         # Overridden per pipeline below — the two crawlers read very different things.
         "what": "Downloads the full text of each article. No AI, no search engine, "
                 "nothing is charged.",
@@ -454,9 +511,9 @@ STEP_META = {
     },
     "generate": {
         "n": 2,
-        "label": "Write stories with AI",
+        "label": "Write stories",
         "button": "Write stories",
-        "verb": "Writing…",
+        "verb": "Writing stories…",
         "what": "Sends each article to Claude, which rewrites it as an original story "
                 "plus a translation and three social posts.",
         "produces": "a story, a translation and social posts per article",
@@ -467,7 +524,7 @@ STEP_META = {
         "n": 3,
         "label": "Check quality",
         "button": "Check quality",
-        "verb": "Checking…",
+        "verb": "Checking quality…",
         "what": "Compares each story against its source — which figures it carried "
                 "over, whether its topics have evidence. Offline and repeatable.",
         "produces": "coverage, precision and gate results per article",
@@ -483,19 +540,19 @@ STEP_META = {
 #: the hint under the field, where they can be styled and can say "no articles
 #: yet" instead of three identical zeros.
 CLUSTER_MODES = [
-    {"value": "off", "label": "Keep every article separate",
-     "hint": "No merging. Ten articles become ten reports, and ten AI calls — "
-             "the most expensive option, and the right one when each article is "
-             "genuinely its own story."},
-    {"value": "story", "label": "Merge articles about the same event (recommended)",
-     "hint": "When two publishers cover one announcement, you get ONE report with "
-             "both articles attached, so you can check the AI's story against both. "
-             "Slightly cheaper than keeping everything separate."},
-    {"value": "topic", "label": "Merge everything on a topic — makes a digest",
-     "hint": "Cheapest, and the bluntest: every article sharing a broad subject is "
-             "merged, even when the stories are unrelated. Measured on real data "
-             "that put six different stories — ticket booking, seat rules, theft — "
-             "into one report. Good for a digest, not for a news article."},
+    {"value": "story", "label": "Combine articles about the same event (recommended)",
+     "hint": "When two news sites cover one announcement, you get ONE story written "
+             "from both, and can check it against both. Slightly cheaper than one "
+             "story per article."},
+    {"value": "off", "label": "One story per article",
+     "hint": "No combining. Ten articles become ten stories and ten paid AI "
+             "requests — the most expensive option, and the right one when each "
+             "article is genuinely its own story."},
+    {"value": "topic", "label": "Combine everything on a topic (digest)",
+     "hint": "Cheapest and bluntest: every article sharing a broad subject is "
+             "combined, even unrelated ones. On real data it put six different "
+             "stories — ticket booking, seat rules, theft — into one. Good for a "
+             "digest, not for a news story."},
 ]
 
 #: How user keywords combine with the built-in railway relevance test. Mirrors
@@ -512,13 +569,13 @@ KEYWORD_MODES = [
 
 #: Day-window choices offered in the UI. "" means "use the config default".
 DAY_CHOICES = [
-    {"value": "", "label": "config default (%d days)"},   # filled in per pipeline
-    {"value": "1", "label": "today only"},
-    {"value": "3", "label": "last 3 days"},
-    {"value": "7", "label": "last 7 days"},
-    {"value": "10", "label": "last 10 days"},
-    {"value": "30", "label": "last 30 days"},
-    {"value": "0", "label": "no date limit"},
+    {"value": "", "label": "Last %d days (default)"},   # filled in per pipeline
+    {"value": "1", "label": "Today"},
+    {"value": "3", "label": "Last 3 days"},
+    {"value": "7", "label": "Last 7 days"},
+    {"value": "10", "label": "Last 10 days"},
+    {"value": "30", "label": "Last 30 days"},
+    {"value": "0", "label": "Any date"},
 ]
 
 
@@ -560,6 +617,14 @@ def _selectable(pipeline: str) -> list[dict]:
         return [{"value": s["name"], "label": s["name"], "checked": True,
                  "note": "%d listing page(s)" % len(s.get("start_urls") or [])}
                 for s in group.get("sources", [])]
+    if kind == "engines":
+        has_key = bool(config_env.get("BRAVE_API_KEY"))
+        notes = {"brave": "billed per search · " + (
+                     "key found" if has_key else "no BRAVE_API_KEY in .env — will be skipped"),
+                 "bing": "free · no key needed"}
+        return [{"value": e, "label": config_search.ENGINE_LABELS[e],
+                 "checked": e != "brave" or has_key, "note": notes.get(e, "")}
+                for e in config_search.ENGINES]
     # A new pipeline must declare how its sources are listed. Falling through to
     # the publisher branch would silently hand it the WEB pipeline's config.
     raise NotImplementedError(
@@ -567,7 +632,14 @@ def _selectable(pipeline: str) -> list[dict]:
 
 
 #: Sources/zones a crawl will visit, so the progress bar has a denominator.
-def _crawl_units(pipeline: str) -> int:
+#: With `params` (a run about to start), the keyword pipeline counts one unit per
+#: keyword per engine — that is what each of its "=== … ===" lines marks.
+def _crawl_units(pipeline: str, params: dict | None = None) -> int:
+    if params is not None and PIPELINES[pipeline]["source_kind"] == "engines":
+        engines = params.get("sources") or config_search.ENGINES
+        terms = (hindi_text.parse_keywords(params.get("keywords"))
+                 or config_search.DEFAULT_KEYWORDS)
+        return len(engines) * len(terms)
     return len(_selectable(pipeline))
 
 
@@ -580,16 +652,16 @@ STAGES = {"crawl": "CRAWL_OUTPUT", "agency": "AGENCY_OUTPUT", "scored": "SCORED_
 #: checked" in STAGE_META, "Fetch/Write/Check" in STEP_META and "1 · Crawl /
 #: 2 · AI Generate / 3 · Grounded Score" in `_state` — so a reader could not
 #: tell whether they were three stages or a dozen.
-STAGE_LABEL = {"crawl": "fetched", "agency": "AI written", "scored": "quality checked"}
+STAGE_LABEL = {"crawl": "found", "agency": "written", "scored": "quality checked"}
 
 #: The three stages as a PIPELINE, for the Browse-articles selector: a step
 #: number, a plain-language name, one line saying what the stage actually holds,
 #: and a colour. A reviewer who does not know the codebase should be able to read
 #: the selector as "1 -> 2 -> 3" and know where the data came from.
 STAGE_META = {
-    "crawl":  {"n": 1, "name": "Fetched",     "tone": "crawl",
+    "crawl":  {"n": 1, "name": "Articles found", "tone": "crawl",
                "what": "the publisher's own text, exactly as downloaded. No AI."},
-    "agency": {"n": 2, "name": "AI written",  "tone": "story",
+    "agency": {"n": 2, "name": "Stories written", "tone": "story",
                "what": "each article rewritten by the AI, plus a translation and social posts."},
     "scored": {"n": 3, "name": "Quality checked", "tone": "ok",
                "what": "the AI stories with their fact, coverage and plagiarism scores measured."},
@@ -701,6 +773,52 @@ def _plagiarism_not_comparable(article: dict) -> bool:
     return (article.get("plagiarism_detail") or "") in _PLAGIARISM_NA_DETAILS
 
 
+def _band(v, good, ok_, lower_is_better=False):
+    """ok / warn / err for one score, "none" when there is no value.
+
+    The single set of thresholds behind both the Review list and the side-by-side
+    page, so the two can never colour the same number differently.
+    """
+    if v is None:
+        return "none"
+    if lower_is_better:
+        return "ok" if v <= good else ("warn" if v <= ok_ else "err")
+    return "ok" if v >= good else ("warn" if v >= ok_ else "err")
+
+
+def _quality(article: dict) -> dict:
+    """The three quality numbers as a reader sees them: plain label, value, colour,
+    and a sentence saying what the number means and which direction is good."""
+    cov = article.get("coverage_score")
+    plag = None if _plagiarism_not_comparable(article) else article.get("plagiarism_score")
+    fact = article.get("fact_score")
+    numbers = [
+        {"key": "coverage", "label": "Facts kept", "value": cov,
+         "display": "—" if cov is None else "%s%%" % cov,
+         "band": _band(cov, 60, 30), "dim": False,
+         "tip": "Share of the original article's facts and figures that the story "
+                "kept. Higher is better."},
+        {"key": "plagiarism", "label": "Copied text", "value": plag,
+         "display": "—" if plag is None else "%s%%" % plag,
+         "band": _band(plag, 20, 35, lower_is_better=True), "dim": False,
+         "tip": ("The texts were too short to compare." if plag is None and
+                 article.get("plagiarism_score") is not None else
+                 "Share of the story copied word for word from the original. "
+                 "Lower is better: up to 20% is fine, over 35% needs rewriting.")},
+        {"key": "fact", "label": "AI's self-rating", "value": fact,
+         "display": "—" if fact is None else str(fact),
+         "band": "none", "dim": True,
+         "tip": "The AI's own confidence in what it wrote. Nothing checks it, so "
+                "treat it as the weakest signal."},
+    ]
+    checked = article.get("gates_passed") is not None or cov is not None
+    failures = list(article.get("gate_failures") or [])
+    needs_look = checked and (article.get("gates_passed") is False
+                              or any(n["band"] == "err" for n in numbers[:2]))
+    return {"numbers": numbers, "checked": checked, "needs_look": needs_look,
+            "failures": failures}
+
+
 def _rows(pipeline: str, stage: str) -> list[dict]:
     arts = _read_json(_stage_path(pipeline, stage)) or []
     excluded = _excluded_keys(pipeline, arts) if stage == "crawl" else set()
@@ -725,6 +843,10 @@ def _rows(pipeline: str, stage: str) -> list[dict]:
             "snippet": _snippet(body),
             "chars": len(body),
             "short": len(body) < 300,
+            # Hindi first: for an English source the Hindi headline is the translated one.
+            "ai_headline": next((h for h in (a.get("ai_headline"), a.get("ai_headline_translated"))
+                                 if h and _text_lang(h) == "hi"), a.get("ai_headline") or ""),
+            "quality": _quality(a),
             "extractor": a.get("extractor") or "",
             "generic": a.get("extractor") == "generic",
             "body_hindi": a.get("body_hindi_ratio"),
@@ -878,7 +1000,9 @@ def _run_estimate(pipeline: str) -> dict:
             # `total` is what makes an empty pipeline explainable: zero reports
             # because zero articles is a different message from zero reports
             # because everything is already written.
-            "total": len(arts)}
+            "total": len(arts),
+            # Fetched articles the user discarded on the Browse page; not sent to AI.
+            "discarded": len(_read_json(cfg.CRAWL_OUTPUT) or []) - len(arts)}
 
 
 def _state(name: str) -> dict:
@@ -927,8 +1051,13 @@ def _state(name: str) -> dict:
         "cluster_modes": CLUSTER_MODES,
         "estimate": estimate,
         "keyword_modes": KEYWORD_MODES,
+        "keyword_copy": PIPELINES[name].get("keyword_copy", DEFAULT_KEYWORD_COPY),
+        "keywords_primary": PIPELINES[name].get("keywords_primary", False),
+        "source_word_plural": PIPELINES[name]["source_word_plural"],
+        "icon": PIPELINES[name]["icon"],
         "selectable": _selectable(name),
-        "select_label": "%s to crawl" % PIPELINES[name]["source_word_plural"],
+        "select_label": PIPELINES[name].get(
+            "select_label", "%s to crawl" % PIPELINES[name]["source_word_plural"]),
         "steps": [
             {"key": "crawl", "label": "1 · Fetch articles",
              "enabled": not busy, "why": "",
@@ -938,7 +1067,7 @@ def _state(name: str) -> dict:
              "meta": meta("crawl"), "is_next": next_step == "crawl"},
             {"key": "generate", "label": "2 · Write stories with AI",
              "enabled": not busy and bool(estimate["total"]),
-             "why": ("" if estimate["total"] else "include at least one fetched article"
+             "why": ("" if estimate["total"] else "every fetched article is discarded — restore at least one"
                      if crawl["count"] else "do step 1, Fetch articles, first"),
              "artifact": agency,
              "detail": "%s of %s selected reports have a story"
@@ -966,6 +1095,178 @@ def _state(name: str) -> dict:
             st["why"] = "“%s” is running on %s; one step runs at a time" % (
                 STEP_META[cur.step]["label"], PIPELINES[cur.pipeline]["title"])
     return state
+
+
+# ------------------------------------------------------------ guided flow
+
+#: The four screens of the panel, in order. Steps 1 and 3 run jobs ("crawl" and
+#: "generate", which also checks quality); step 2 is the user's choice; step 4
+#: reads the results and can re-run the free check ("score").
+FLOW_STEPS = ("find", "choose", "write", "review")
+FLOW_TITLES = {"find": "Find articles", "choose": "Choose articles",
+               "write": "Write stories", "review": "Review results"}
+_JOB_SCREEN = {"crawl": "find", "generate": "write", "score": "review"}
+
+
+def _plain_error(text: str) -> str:
+    """The sentence a reader needs from a traceback: its last line, without the
+    exception class. The full traceback stays in the technical log."""
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    if not lines:
+        return ""
+    last = lines[-1]
+    m = re.match(r"^[A-Za-z_.]*(Error|Exception|Interrupt|Exit)\w*:\s*(.+)$", last)
+    return m.group(2) if m else last
+
+
+def _last_runs(pipeline: str) -> dict:
+    """The most recent run of each job step on `pipeline`, from run history."""
+    out = {}
+    for b in _recent(limit=0):
+        if b.get("pipeline") == pipeline and b.get("step") not in out:
+            out[b.get("step")] = b
+    return out
+
+
+def _find_summary(pipeline: str, params: dict | None) -> str:
+    """The last search's settings in one phrase: "last 7 days · वंदे भारत"."""
+    params = params or {}
+    days = params.get("days")
+    if days in (None, "", "default"):
+        when = "last %d days" % PIPELINES[pipeline]["cfg"].DAYS_BACK
+    elif str(days) == "0":
+        when = "any date"
+    elif str(days) == "1":
+        when = "today"
+    else:
+        when = "last %s days" % days
+    bits = [when]
+    kw = hindi_text.parse_keywords(params.get("keywords"))
+    if kw:
+        bits.append(", ".join(kw))
+    picked = params.get("sources")
+    if picked:
+        bits.append("%d %s" % (len(picked), PIPELINES[pipeline]["source_word_plural"]))
+    return " · ".join(bits)
+
+
+def _story_rows(pipeline: str, stage: str, mode: str) -> list[dict]:
+    """Rows of `stage` that carry a story for one of the CURRENT selection's
+    stories in `mode` — so results from discarded articles or from another way
+    of combining never show up as if they belonged to this run."""
+    rows = _rows(pipeline, stage)
+    arts = _selected_articles(pipeline)
+    titles = ({_resume_key(c["title"]) for c in clustering.build_clusters(arts, mode=mode)}
+              if arts else set())
+    return [r for r in rows if _resume_key(r["title"]) in titles and r["has_story"]]
+
+
+def _flow(name: str, open_step: str | None = None, mode: str | None = None) -> dict:
+    """What each of the four screens shows, and which one is open.
+
+    Pure read of the files on disk plus run history: nothing here is stored.
+    Exactly one step is open (`focus`); the others collapse to one line.
+    """
+    st = _state(name)
+    cur = CURRENT                       # one read; see the race note in _state
+    cfg = PIPELINES[name]["cfg"]
+    est = st["estimate"]
+    runs = _last_runs(name)
+    if mode not in clustering.MODES:
+        mode = ((runs.get("generate") or {}).get("params") or {}).get("cluster_mode")
+        if mode not in clustering.MODES:
+            mode = "story"
+
+    found_info = _artifact(cfg.CRAWL_OUTPUT)
+    found = found_info["count"] or 0
+    selected, discarded = est["total"], est["discarded"]
+    planned, written = est["counts"][mode], est["skipped"][mode]
+    calls, checked = est["calls"][mode], est["checked"][mode]
+    key = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
+    running = _JOB_SCREEN.get(cur.step) if cur is not None and cur.pipeline == name else None
+    busy_reason = ("" if cur is None or running else
+                   "“%s” is running on %s. Wait for it to finish — one step runs at a time."
+                   % (STEP_META[cur.step]["label"], PIPELINES[cur.pipeline]["title"]))
+
+    def failed(step):
+        b = runs.get(step)
+        return _plain_error(b.get("error")) if b and b.get("state") == "error" else ""
+
+    steps = {s: {"key": s, "title": FLOW_TITLES[s], "n": i + 1, "lock": "",
+                 "summary": "", "message": "", "error": "", "status": "ready"}
+             for i, s in enumerate(FLOW_STEPS)}
+
+    f = steps["find"]
+    f["error"] = failed("crawl")
+    if found:
+        f["status"] = "done"
+        f["summary"] = "%d articles found · %s · %s" % (
+            found, _find_summary(name, (runs.get("crawl") or {}).get("params")),
+            found_info["when"])
+    elif found_info["exists"] and not f["error"]:
+        f["message"] = ("Nothing was found. Try a longer time range"
+                        + (" or other keywords." if name == "search" else "."))
+
+    c = steps["choose"]
+    if not found:
+        c["lock"] = "Find articles first."
+    else:
+        c["status"] = "done" if written else "ready"
+        c["summary"] = "%d selected · %d discarded" % (selected, discarded)
+        if not selected:
+            c["message"] = "You discarded every article — restore at least one to continue."
+
+    w = steps["write"]
+    w["error"] = failed("generate")
+    if not found:
+        w["lock"] = "Find and choose articles first."
+    elif not selected:
+        w["lock"] = "Every article is discarded — restore at least one in step 2."
+    elif not key["set"]:
+        w["lock"] = ("No Anthropic API key found. Add ANTHROPIC_API_KEY to the .env file "
+                     "in the research folder, then restart the control panel.")
+    if written and not calls:
+        w["status"] = "done"
+        w["summary"] = "%d stor%s written" % (written, "y" if written == 1 else "ies")
+    elif written:
+        w["status"] = "partial"
+        w["summary"] = "%d of %d stories written" % (written, planned)
+        w["message"] = ("%d of %d stories are written. Write the rest — finished "
+                        "stories are not paid for again." % (written, planned))
+
+    r = steps["review"]
+    r["error"] = failed("score")
+    if not written:
+        r["lock"] = "Write stories first."
+    else:
+        r["summary"] = "%d stor%s" % (written, "y" if written == 1 else "ies")
+
+    for s in steps.values():
+        if s["key"] == running:
+            s["status"] = "running"
+
+    if running:
+        focus = running
+    elif open_step in steps and not steps[open_step]["lock"]:
+        focus = open_step
+    elif not found:
+        focus = "find"
+    elif not written:
+        focus = "choose"
+    elif calls:
+        focus = "write"
+    else:
+        focus = "review"
+
+    return {
+        "focus": focus, "mode": mode, "busy_reason": busy_reason,
+        "can_run": cur is None, "running": running, "steps": steps,
+        "key": key, "estimate": est,
+        "state": st,            # reused by callers so the estimate is computed once
+        "counts": {"found": found, "selected": selected, "discarded": discarded,
+                   "planned": planned, "written": written, "calls": calls,
+                   "checked": checked, "unchecked": max(0, written - checked)},
+    }
 
 
 # ---------------------------------------------------------------- the steps
@@ -1069,14 +1370,38 @@ def _step_rsb_crawl(job: Job, p: dict) -> str:
     return _crawl_summary(job, arts)
 
 
-def _crawl_summary(job: Job, arts: list) -> str:
+def _step_search_crawl(job: Job, p: dict) -> str:
+    n = _cap(p, "max_per_keyword")
+    days = _days_param(p)
+    engines = p.get("sources") or None
+    kw, kw_mode = _keywords(p)
+    job.log("run_keyword_search(keywords=%s, engines=%s, days=%s, max_per_keyword=%s) -> %s"
+            % ("%s [%s]" % (", ".join(kw), kw_mode) if kw else
+               "defaults (%s)" % ", ".join(config_search.DEFAULT_KEYWORDS),
+               ",".join(engines or config_search.ENGINES),
+               "config default (%d)" % config_search.DAYS_BACK if days is None else days,
+               "uncapped" if n is None else n,
+               os.path.relpath(config_search.CRAWL_OUTPUT, _RESEARCH_DIR)))
+    _backup(config_search.CRAWL_OUTPUT, job)
+    _clear_downstream(job, "search")
+    arts = search_pipeline.run_keyword_search(
+        keywords=kw or None, engines=engines, days=days, max_per_keyword=n,
+        keyword_mode=kw_mode, out_file=config_search.CRAWL_OUTPUT, verbose=True)
+    _excluded_keys("search", arts, after_crawl=True)
+    return _crawl_summary(job, arts, generic_expected=PIPELINES["search"]["generic_expected"])
+
+
+def _crawl_summary(job: Job, arts: list, generic_expected: bool = False) -> str:
     """The two silent-failure checks worth surfacing on every crawl."""
     if not arts:
         return "0 articles — nothing matched. See the log for per-source detail."
     from collections import Counter
     ex = Counter(a.get("extractor", "?") for a in arts)
     job.log("\nextractor -> %s" % dict(ex))
-    if ex.get("generic"):
+    if ex.get("generic") and generic_expected:
+        job.log("  %d article(s) from publishers without a dedicated selector used the "
+                "generic <p> sweep." % ex["generic"])
+    elif ex.get("generic"):
         job.log("  WARNING: %d article(s) used the generic <p> sweep — that domain's "
                 "dedicated selector has drifted." % ex["generic"])
     short = [a for a in arts if len(a.get("body", "") or "") < 300]
@@ -1099,7 +1424,7 @@ def _cluster_input(job: Job, cfg, mode: str) -> str:
     """
     arts = _selected_articles(job.pipeline)
     if not arts:
-        raise ValueError("No articles selected for AI. Include at least one fetched article before step 2.")
+        raise ValueError("No articles selected for AI. Restore at least one discarded article before step 2.")
     job.log("%d article(s) selected for AI" % len(arts))
     if mode == "off":
         path = cfg.CRAWL_OUTPUT.replace(".json", "_selected.json")
@@ -1134,7 +1459,7 @@ def _cluster_input(job: Job, cfg, mode: str) -> str:
 def _step_generate(job: Job, p: dict, name: str) -> str:
     cfg = PIPELINES[name]["cfg"]
     if not _selected_articles(name):
-        raise ValueError("No articles selected for AI. Include at least one fetched article before step 2.")
+        raise ValueError("No articles selected for AI. Restore at least one discarded article before step 2.")
     key = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
     if not config_env.apply_to_engine(engine):
         raise RuntimeError(
@@ -1193,13 +1518,47 @@ def _step_score(job: Job, p: dict, name: str) -> str:
         len(scored), len(gated), len(set(cov)), len(set(fact)))
 
 
+def _step_write_and_check(job: Job, p: dict, name: str) -> str:
+    """Write stories, then run the free quality check in the same job.
+
+    The check is offline and takes about a second, so a separate button for it
+    was one more thing to understand and forget. It also runs after a partial
+    failure: stories already written were paid for and deserve a check. A failed
+    check never fails the job — the paid part succeeded, and Review offers to
+    check again.
+    """
+    cfg = PIPELINES[name]["cfg"]
+    job.progress["stage"] = "write"
+    error = None
+    try:
+        summary = _step_generate(job, p, name)
+    except Exception as e:
+        error, summary = e, ""
+    check = ""
+    if _generated_count(cfg.AGENCY_OUTPUT):
+        job.progress.update(stage="check", phase="checking quality (free)…")
+        # Deliberately not "=== … ===": Job._track counts those lines as progress.
+        job.log("\n--- Checking quality (automatic, free) ---")
+        try:
+            check = _step_score(job, p, name)
+        except Exception:
+            job.log("  WARNING: quality check FAILED\n" + traceback.format_exc(limit=4))
+            check = "quality check failed — check again from Review results"
+    if error is not None:
+        raise error
+    return summary + (" · quality: " + check if check else "")
+
+
 STEPS = {
     ("web", "crawl"): _step_web_crawl,
     ("rsb", "crawl"): _step_rsb_crawl,
-    ("web", "generate"): lambda j, p: _step_generate(j, p, "web"),
-    ("rsb", "generate"): lambda j, p: _step_generate(j, p, "rsb"),
+    ("search", "crawl"): _step_search_crawl,
+    ("web", "generate"): lambda j, p: _step_write_and_check(j, p, "web"),
+    ("rsb", "generate"): lambda j, p: _step_write_and_check(j, p, "rsb"),
+    ("search", "generate"): lambda j, p: _step_write_and_check(j, p, "search"),
     ("web", "score"): lambda j, p: _step_score(j, p, "web"),
     ("rsb", "score"): lambda j, p: _step_score(j, p, "rsb"),
+    ("search", "score"): lambda j, p: _step_score(j, p, "search"),
 }
 
 
@@ -1219,12 +1578,30 @@ SAME_STORY_JACCARD = 0.45
 #: the two UIs teach the same visual language.
 #:
 #: `tone` selects a colour from `.tone-*` in _base.html.
+#: The engine writes `ai_news_story` in the SOURCE article's language and
+#: `ai_news_story_translated` in the other one — so for an English source the first
+#: field is English and the translation is Hindi. Tabs are therefore labelled by the
+#: language actually in the text (see _ai_story_tabs), never by field position.
 AI_STORY_LANGS = [
-    {"key": "hi", "label": "Hindi", "note": "as written, in the source language",
+    {"key": "story", "role": "original",
      "headline": "ai_headline", "body": "ai_news_story"},
-    {"key": "en", "label": "English", "note": "translation of the Hindi story",
+    {"key": "translated", "role": "translation",
      "headline": "ai_headline_translated", "body": "ai_news_story_translated"},
 ]
+LANG_NAMES = {"hi": "Hindi", "en": "English"}
+
+
+def _text_lang(text: str, fallback: str = "") -> str:
+    """"hi" if the text is mostly Devanagari, "en" if mostly Latin, else `fallback`.
+
+    Counts letters only. Hindi vowel signs (matras) are not `isalpha`, so they are
+    counted explicitly by Unicode block rather than through isalpha.
+    """
+    deva = sum(1 for ch in text if "\u0900" <= ch <= "\u097f")
+    latin = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+    if not deva and not latin:
+        return fallback
+    return "hi" if deva >= latin else "en"
 
 AI_SOCIAL = [
     {"field": "social_twitter", "label": "Twitter / X post", "tone": "tw"},
@@ -1239,18 +1616,37 @@ AI_EXTRA = [
 
 
 def _ai_story_tabs(art: dict) -> list[dict]:
-    """One entry per language that actually has text, for the story tab strip.
+    """One entry per story field that actually has text, for the story tab strip.
 
-    A language with neither a headline nor a body is dropped rather than shown as
-    an empty tab — translation is a separate model field and is often absent.
+    Each tab is labelled by the language detected in its own text, falling back to
+    the model's `source_lang` — so an English source no longer shows its Hindi
+    translation under an "English" tab. Hindi comes first: this is a Hindi desk.
+    A field with neither headline nor body is dropped rather than shown empty.
     """
+    src = art.get("source_lang") if art.get("source_lang") in LANG_NAMES else ""
+    other = {"hi": "en", "en": "hi"}
     out = []
-    for lang in AI_STORY_LANGS:
-        headline = art.get(lang["headline"]) or ""
-        body = art.get(lang["body"]) or ""
-        if headline or body:
-            out.append(dict(lang, headline=headline, body=body,
-                            chars=len(body)))
+    for f in AI_STORY_LANGS:
+        headline = art.get(f["headline"]) or ""
+        body = art.get(f["body"]) or ""
+        if not (headline or body):
+            continue
+        guess = src if f["role"] == "original" else other.get(src, "")
+        lang = _text_lang(headline + " " + body, guess)
+        out.append(dict(f, lang=lang, headline=headline, body=body, chars=len(body)))
+    names = [LANG_NAMES.get(t["lang"], "Story") for t in out]
+    for t, name in zip(out, names):
+        # Same language twice means the model did not really translate; say so.
+        dup = names.count(name) > 1
+        t["label"] = name + (" (translation)" if dup and t["role"] == "translation" else "")
+        if t["role"] == "original":
+            t["note"] = "as written, in the source article's language"
+        else:
+            src_name = next((LANG_NAMES.get(o["lang"], "original") for o in out
+                             if o["role"] == "original"), "original")
+            t["note"] = ("translation of the %s story" % src_name if not dup else
+                         "should be a translation, but is in the same language as the story")
+    out.sort(key=lambda t: (t["lang"] != "hi", t["role"] != "original"))
     return out
 
 
@@ -1323,11 +1719,7 @@ def _same_story(articles: list, index: int) -> list[dict]:
 
 def _scores(art: dict) -> list[dict]:
     """The score badges for the verification header, with what each one means."""
-    def band(v, good, ok_):
-        if v is None:
-            return "none"
-        return "ok" if v >= good else ("warn" if v >= ok_ else "err")
-
+    band = _band
     fact = art.get("fact_score")
     plag = art.get("plagiarism_score")
     cov = art.get("coverage_score")
@@ -1339,12 +1731,12 @@ def _scores(art: dict) -> list[dict]:
     # dash two clicks away. Same guard, one source of truth.
     plag_na = _plagiarism_not_comparable(art)
     rows = [
-        {"key": "fact_score", "label": "Fact score", "value": fact,
+        {"key": "fact_score", "label": "AI's self-rating", "value": fact,
          "band": band(fact, 80, 50), "computed": "the model marking its own work",
          "hint": "The AI's own confidence in the story it just wrote. Nothing "
                  "checks it, and it barely varies — treat it as the weakest "
                  "signal on this page."},
-        {"key": "plagiarism_score", "label": "Plagiarism", "value":
+        {"key": "plagiarism_score", "label": "Copied text", "value":
              None if plag_na else plag,
          # lower is better, so the bands invert
          "band": "none" if (plag is None or plag_na) else
@@ -1356,7 +1748,7 @@ def _scores(art: dict) -> list[dict]:
                   "counted in four-word runs. LOWER is better: under 20% is "
                   "good, over 35% needs rewriting."),
          "na": plag_na},
-        {"key": "coverage_score", "label": "Coverage", "value": cov,
+        {"key": "coverage_score", "label": "Facts kept", "value": cov,
          "band": band(cov, 60, 30), "computed": "measured against the source",
          "hint": "How many of the source's facts and figures the story kept. "
                  "The most useful number here — it varies far more than the "
@@ -1385,6 +1777,62 @@ def _pipeline_names() -> list[str]:
     return sorted(PIPELINES, key=lambda n: PIPELINES[n]["number"])
 
 
+#: Every status the UI shows, as a word, a colour tone and a Lucide icon — never
+#: colour alone. One map, as in the reference console's words.ts, so the same state
+#: reads the same on every page.
+STATUS_WORDS = {
+    "running":    {"label": "Running",               "tone": "info",    "icon": "loader-circle"},
+    "ok":         {"label": "Done",                  "tone": "success", "icon": "circle-check"},
+    "error":      {"label": "Failed",                "tone": "danger",  "icon": "circle-x"},
+    "recorded":   {"label": "Recorded",              "tone": "outline", "icon": "file-text"},
+    "done":       {"label": "Done",                  "tone": "success", "icon": "circle-check"},
+    "partial":    {"label": "Partly done",           "tone": "warning", "icon": "triangle-alert"},
+    "ready":      {"label": "Ready",                 "tone": "primary", "icon": "play"},
+    "locked":     {"label": "Waiting",               "tone": "outline", "icon": "circle-dashed"},
+    "fine":       {"label": "Looks fine",            "tone": "success", "icon": "circle-check"},
+    "look":       {"label": "Needs a closer look",   "tone": "warning", "icon": "triangle-alert"},
+    "unchecked":  {"label": "Not checked yet",       "tone": "outline", "icon": "circle-dashed"},
+    "paid":       {"label": "Paid step",             "tone": "warning", "icon": "key-round"},
+    "selected":   {"label": "Selected",              "tone": "success", "icon": "circle-check"},
+    "discarded":  {"label": "Discarded",             "tone": "outline", "icon": "trash-2"},
+}
+
+#: Sidebar icon per source type.
+PIPELINE_ICONS = {"web": "newspaper", "rsb": "landmark", "search": "search"}
+
+
+def _iso_from_log(log_name: str) -> str:
+    """`20261013-040455-web-crawl.log` -> `2026-10-13T04:04:55`, for <time datetime>."""
+    m = _parse_log_name(log_name or "")
+    try:
+        return _dt.datetime.strptime(m["date"] + m["time"], "%Y%m%d%H%M%S").isoformat()
+    except ValueError:
+        return ""
+
+
+def _shell() -> dict:
+    """What the app shell (sidebar footer, header status pill) needs on every page.
+
+    Deliberately cheap: one read of CURRENT, the newest run sidecar, two key checks.
+    Nothing here runs the clustering behind _flow.
+    """
+    cur = CURRENT
+    running = None
+    if cur is not None:
+        running = {"pipeline": cur.pipeline, "title": PIPELINES[cur.pipeline]["title"],
+                   "label": STEP_META[cur.step]["verb"].rstrip("…"), "step": cur.step}
+    last = None
+    if running is None:
+        recent = _recent(1)
+        if recent:
+            b = recent[0]
+            last = dict(b, iso=_iso_from_log(b.get("log_name", "")),
+                        title=PIPELINES.get(b.get("pipeline"), {}).get("title", b.get("pipeline", "")))
+    ai = config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)
+    return {"running": running, "last": last, "ai_key": ai["set"],
+            "brave_key": bool(config_env.get("BRAVE_API_KEY"))}
+
+
 @app.context_processor
 def _inject_pipelines():
     """Every template can list the pipelines, so no page hardcodes "the other one".
@@ -1392,12 +1840,15 @@ def _inject_pipelines():
     The old switch links read `'rsb' if pipeline == 'web' else 'web'` — correct
     for exactly two and wrong the moment a third is added.
     """
-    return {"all_pipelines": [dict(PIPELINES[n], name=n) for n in _pipeline_names()]}
+    return {"all_pipelines": [dict(PIPELINES[n], name=n, nav_icon=PIPELINE_ICONS.get(n, "layers"))
+                              for n in _pipeline_names()],
+            "status_words": STATUS_WORDS, "shell": _shell()}
 
 
 def _card(name: str) -> dict:
     """The one-glance summary of a pipeline for the landing page."""
-    st = _state(name)
+    flow = _flow(name)
+    st = flow["state"]
     cfg = PIPELINES[name]["cfg"]
     # `_state` keeps the artifacts as locals and only surfaces them inside
     # `steps`, so read them directly — it is what the steps do anyway.
@@ -1414,7 +1865,12 @@ def _card(name: str) -> dict:
         "fetched": crawl["count"] or 0, "written": written, "checked": scored["count"] or 0,
         "last": max(whens) if whens else "",
         "running": st["running_step"], "next_step": st["next_step"],
-        "next_label": STEP_META[st["next_step"]]["label"] if st["next_step"] else "",
+        "next_label": FLOW_TITLES[flow["focus"]],
+        "started": bool(crawl["count"]),
+        "focus": flow["focus"],
+        "steps": [{"key": k, "title": FLOW_TITLES[k], "status": flow["steps"][k]["status"],
+                   "locked": bool(flow["steps"][k]["lock"])} for k in FLOW_STEPS],
+        "nav_icon": PIPELINE_ICONS.get(name, "layers"),
     }
 
 
@@ -1436,14 +1892,23 @@ def index():
 
 @app.get("/panel/<pipeline>")
 def panel(pipeline):
-    """The full control window for ONE pipeline."""
+    """One source type as four guided steps: find, choose, write, review.
+
+    Only the step that matters now is open; `?open=<step>` reopens a finished
+    one and `?mode=` picks how articles are combined into stories.
+    """
     if pipeline not in PIPELINES:
         return _unknown_pipeline(pipeline)
+    flow = _flow(pipeline, request.args.get("open"), request.args.get("mode"))
+    review_stage = "scored" if flow["counts"]["checked"] else "agency"
+    review_rows = _story_rows(pipeline, review_stage, flow["mode"]) if flow["counts"]["written"] else []
+    choose_rows = _rows(pipeline, "crawl") if flow["counts"]["found"] else []
     return render_template(
-        "index.html",
-        nav="panel", pipelines=[_state(pipeline)], pipeline=pipeline,
-        key=config_env.describe("ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY),
-        recent=_recent(),
+        "panel.html", nav="panel", pipeline=pipeline,
+        p=flow["state"], flow=flow,
+        choose_rows=choose_rows, review_rows=review_rows, review_stage=review_stage,
+        needs_look=sum(1 for r in review_rows if r["quality"]["needs_look"]),
+        key=flow["key"],
     )
 
 
@@ -1466,7 +1931,12 @@ def run(pipeline, step):
                                  % (STEP_META[CURRENT.step]["label"],
                                     PIPELINES[CURRENT.pipeline]["title"])), 409
         if step == "generate" and not _selected_articles(pipeline):
-            return jsonify(error="No articles selected for AI. Include at least one fetched article before step 2."), 400
+            return jsonify(error="No articles selected for AI. Restore at least one discarded article before step 2."), 400
+        if step == "generate" and not config_env.describe(
+                "ANTHROPIC_API_KEY", engine.ANTHROPIC_API_KEY)["set"]:
+            return jsonify(error="No Anthropic API key found. Add ANTHROPIC_API_KEY to the "
+                                 ".env file in the research folder, then restart the "
+                                 "control panel."), 400
         job = _run_async(pipeline, step, request.get_json(silent=True) or {})
     return jsonify(job_id=job.id)
 
@@ -1505,9 +1975,14 @@ def api_selection(pipeline):
 
 @app.get("/api/state")
 def api_state():
+    names = _pipeline_names()
+    if request.args.get("pipeline") in PIPELINES:
+        names = [request.args["pipeline"]]
+    cur = CURRENT                       # one read: the worker clears it when a job ends
     return jsonify(
-        pipelines=[_state(n) for n in _pipeline_names()],
-        current=CURRENT.id if CURRENT else None,
+        pipelines=[_state(n) for n in names],
+        current=cur.id if cur else None,
+        current_pipeline=cur.pipeline if cur else None,
         recent=_recent(),
     )
 
@@ -1556,6 +2031,21 @@ def logs():
                            "icon": PIPELINES[pname]["icon"], "stages": stages})
     # anything with an unrecognised pipeline/step still shows, rather than vanishing
     other = [f for f in files if f["pipeline"] not in PIPELINES or f["step"] not in STEP_META]
+    # One sentence per run, grouped by day — how the reference console shows history.
+    days = []
+    for f in files:
+        iso = _iso_from_log(f["name"])
+        f["iso"], f["time"] = iso, iso[11:16] if iso else ""
+        f["source"] = PIPELINES.get(f["pipeline"], {}).get("short") or f["pipeline"]
+        try:
+            d = _dt.datetime.fromisoformat(iso) if iso else None
+            # Built by hand: "%-d" (no leading zero) is not supported on Windows.
+            label = "%s, %d %s" % (d.strftime("%A"), d.day, d.strftime("%B %Y")) if d else "Undated"
+        except ValueError:
+            label = "Undated"
+        if not days or days[-1][0] != label:
+            days.append((label, []))
+        days[-1][1].append(f)
     want = request.args.get("f") or (files[0]["name"] if files else None)
     body, warnings = "", []
     if want:
@@ -1569,7 +2059,7 @@ def logs():
         warnings = [ln for ln in body.splitlines()
                     if "WARNING" in ln or "FAILED" in ln or "Traceback" in ln
                     or "SKIP" in ln or "Error" in ln]
-    return render_template("logs.html", nav="logs", files=files, current=want,
+    return render_template("logs.html", nav="logs", files=files, current=want, days=days,
                            groups=groups, other=other, filt_p=filt_p, filt_s=filt_s,
                            step_meta=STEP_META,
                            body=body, warnings=warnings)
@@ -1596,9 +2086,7 @@ def data(pipeline):
         mode = request.args.get("mode", "story")
         if mode not in clustering.MODES:
             return "unknown mode", 400
-        arts = _selected_articles(pipeline)
-        titles = {_resume_key(c["title"]) for c in clustering.build_clusters(arts, mode=mode)}
-        rows = [r for r in rows if _resume_key(r["title"]) in titles and r["has_story"]]
+        rows = _story_rows(pipeline, stage, mode)
     q = (request.args.get("q") or "").strip()
     if q:
         needle = q.lower()
@@ -1609,6 +2097,7 @@ def data(pipeline):
         "data.html", nav="data", pipeline=pipeline, title=PIPELINES[pipeline]["title"],
         stage=stage, stage_label=STAGE_LABEL[stage], stages=_available_stages(pipeline),
         rows=rows, q=q, selection=selection, selection_view=selection_view,
+        generic_expected=PIPELINES[pipeline].get("generic_expected", False),
         file=os.path.relpath(_stage_path(pipeline, stage), _RESEARCH_DIR),
         total=len(_read_json(_stage_path(pipeline, stage)) or []))
 
@@ -1761,7 +2250,7 @@ def verify(pipeline, index):
     art = arts[index]
     listing, exact = _listing_for(art, _listing_fallback(pipeline))
     return render_template(
-        "verify.html", nav="verify", pipeline=pipeline,
+        "verify.html", generic_expected=PIPELINES[pipeline].get("generic_expected", False), nav="verify", pipeline=pipeline,
         title=PIPELINES[pipeline]["title"], stage=stage,
         stage_label=STAGE_LABEL[stage], stages=_available_stages(pipeline),
         index=index, count=len(arts), art=art,

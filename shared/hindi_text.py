@@ -21,6 +21,7 @@ regex fix. `indic-nlp-library`'s normalizer collapses them; NFC handles the nukt
 not the ZWJ, so it is the fallback rather than the primary path.
 """
 
+import functools
 import re
 import unicodedata
 
@@ -198,14 +199,34 @@ def light_stem(word):
     return w
 
 
-def term_in(term, tokens, blob):
-    """True if `term` occurs as a token, comparing light stems on both sides."""
-    term = normalize_hi(term).lower()
+@functools.lru_cache(maxsize=4096)
+def _term_form(term):
+    """(normalised term, its light stem) — lexicon terms repeat, so compute once."""
+    t = normalize_hi(term).lower()
+    return t, light_stem(t)
+
+
+def token_stems(tokens):
+    """The light stems of `tokens`, for passing to term_in when testing many terms
+    against one text — stemming each token once instead of once per term."""
+    return {light_stem(tok) for tok in tokens}
+
+
+def term_in(term, tokens, blob, stems=None):
+    """True if `term` occurs as a token, comparing light stems on both sides.
+
+    `stems` (from token_stems(tokens)) is an optional precomputation; the answer is
+    identical either way, only faster when many terms are tested against one text.
+    """
+    term, stem = _term_form(term)
     if " " in term:                     # multi-word phrase: substring is safe enough
         return term in blob
-    stem = light_stem(term)
+    if term in tokens:
+        return True
+    if stems is not None:
+        return stem in stems
     for tok in tokens:
-        if tok == term or light_stem(tok) == stem:
+        if light_stem(tok) == stem:
             return True
     return False
 

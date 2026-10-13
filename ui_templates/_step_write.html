@@ -1,0 +1,47 @@
+{#- Step 3 body. The only paid step, so it states the cost as one sentence read
+    off the same clustering and resume rule the run will use (ui._run_estimate).
+    The free quality check runs automatically when writing finishes. -#}
+{% from '_icons.html' import icon %}
+{% from '_status_badge.html' import status with context %}
+{% set s = flow.steps.write %}
+{% set e = flow.estimate %}
+<div class="step-body run-scope" data-step="generate">
+  {% if s.error %}
+  <div class="callout callout-danger" role="alert" style="margin-bottom:14px">{{ icon('circle-x') }}
+    <div class="callout-text"><b>The last run stopped.</b> {{ s.error }}</div></div>
+  {% endif %}
+  {% if s.message %}
+  <div class="callout callout-warning" role="status" style="margin-bottom:14px">{{ icon('triangle-alert') }}
+    <div class="callout-text">{{ s.message }}</div></div>
+  {% endif %}
+
+  <p style="margin:0 0 10px">
+    <span title="Each story is one request to Claude, billed to the Anthropic key in .env.">{{ status('paid') }}</span>
+    <span class="write-estimate"
+          data-counts='{{ e.counts|tojson }}' data-calls='{{ e.calls|tojson }}'
+          data-skipped='{{ e.skipped|tojson }}' data-total="{{ e.total }}"></span>
+  </p>
+  <p class="small dim" style="margin:0 0 12px">Claude rewrites each article as an original story, with a
+    translation and three social media posts. A free quality check runs automatically afterwards.</p>
+
+  <details class="more">
+    <summary>More options · <span class="faint mode-label">{% for m in p.cluster_modes if m.value == flow.mode %}{{ m.label }}{% endfor %}</span></summary>
+    <div class="field" style="margin-top:12px">
+      <label class="field-label" for="mode-{{ pipeline }}">Combine articles?</label>
+      <select id="mode-{{ pipeline }}" class="control mode-select" data-param="cluster_mode" style="max-width:420px">
+        {% for m in p.cluster_modes %}
+          <option value="{{ m.value }}" data-hint="{{ m.hint }}" {{ 'selected' if m.value == flow.mode }}>{{ m.label }}</option>
+        {% endfor %}
+      </select>
+      <span class="field-hint mode-hint" style="max-width:520px"></span>
+      <a data-adv class="small mode-preview" href="/clusters/{{ pipeline }}?mode={{ flow.mode }}">Preview which articles get combined →</a>
+    </div>
+  </details>
+
+  {% include '_runbox.html' %}
+
+  <div style="margin-top:14px">
+    <button type="button" class="btn-primary btn-lg run-btn write-btn" data-step="generate" data-money="1"
+            {{ 'disabled' if not flow.can_run }}>Write stories</button>
+  </div>
+</div>

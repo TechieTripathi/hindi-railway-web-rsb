@@ -1,22 +1,25 @@
 {% extends "_base.html" %}
-{% block title %}Reports this run would produce{% endblock %}
-{% block headerextra %}<span class="faint tiny mono">{{ file }}</span>{% endblock %}
+{% block title %}Story grouping preview{% endblock %}
+{% block headerextra %}<span class="faint tiny mono" data-adv>{{ file }}</span>{% endblock %}
 
 {% block body %}
-<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
-  <h2 style="margin:0; font-size:15px">{{ title }}</h2>
-  <span class="switcher">
-    {% for ap in all_pipelines %}
-      <a href="/clusters/{{ ap.name }}?mode={{ mode }}" class="chip"
-         {% if ap.name == pipeline %}aria-current="page"{% endif %}>{{ ap.icon }} {{ ap.title }}</a>
-    {% endfor %}
-  </span>
-  <span class="spacer"></span>
-  <a href="/data/{{ pipeline }}">browse the articles →</a>
-</div>
+{% from '_icons.html' import icon %}
+<header class="page-header">
+  <div>
+    <h1>Story grouping preview</h1>
+    <p class="lede">How the selected articles of {{ title }} would be combined into stories, for each way of combining. Free — nothing is sent to the AI.</p>
+    <div class="meta switcher">
+      {% for ap in all_pipelines %}
+        <a href="/clusters/{{ ap.name }}?mode={{ mode }}" class="chip"
+           {% if ap.name == pipeline %}aria-current="page"{% endif %}>{{ icon(ap.nav_icon, 14) }}{{ ap.short or ap.title }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="actions"><a class="btn btn-sm" href="/panel/{{ pipeline }}">{{ icon('arrow-left') }}Back to the panel</a></div>
+</header>
 
 <section class="panel" style="padding:16px 18px; margin-bottom:16px">
-  <strong style="font-size:14px">How many reports would this crawl produce?</strong>
+  <strong style="font-size:14px">How would the selected articles be combined into stories?</strong>
   <p class="dim small" style="margin:6px 0 12px">
     {{ total }} selected article(s). The count depends entirely on how they are grouped —
     there is no fixed number.
@@ -44,10 +47,10 @@
     The three numbers above are all zero for that reason — not because the
     grouping found nothing.
   {% else %}
-    <strong>{{ rows|length }}</strong> report(s) from {{ total }} article(s) ·
+    <strong>{{ rows|length }}</strong> stor{{ 'y' if rows|length == 1 else 'ies' }} from {{ total }} article(s) ·
     <strong>{{ multi }}</strong> would draw on more than one source
-    {% if not multi %}<span class="faint">— no two articles in this crawl cover the same
-    event, so each report has a single source to check against</span>{% endif %}
+    {% if not multi %}<span class="faint">— no two of these articles cover the same
+    event, so each story has a single source to check against</span>{% endif %}
   {% endif %}
 </p>
 
@@ -81,7 +84,7 @@
 
 {% if not rows %}
 <div class="panel" style="padding:18px">
-  <p class="dim" style="margin:0">No articles selected. <a href="/data/{{ pipeline }}?stage=crawl">Review fetched articles →</a></p>
+  <p class="dim" style="margin:0">No articles selected. <a href="/panel/{{ pipeline }}?open=choose">Choose articles →</a></p>
 </div>
 {% endif %}
 {% endblock %}
