@@ -62,6 +62,10 @@ News editors need a fast way to:
 ### 7.2 Data Collection
 - The system shall crawl official portals for recent press releases.
 - The system shall support configurable zone selection and date range filters.
+- The system shall report an official portal it could not reach as an error, never as "no
+  results found".
+- When a date range holds no releases, the system shall tell the user the date of the
+  newest release, so they know how far to widen the range.
 - The system shall collect web news via Google News RSS and resolve article URLs.
 - The system shall store crawl results as JSON output files.
 
@@ -70,6 +74,9 @@ News editors need a fast way to:
 - The system shall generate social media variants in both languages.
 - The system shall assign impact level, topics, and themes.
 - The system shall produce fact score and plagiarism score.
+- The system shall detect AI output that was cut off before the end, retry it, and never
+  present its missing parts (posts, impact, topics, scores) as if the model had written
+  them.
 
 ### 7.4 Source Validation
 - The system shall display source confidence badges based on the number of distinct sources.
@@ -79,6 +86,10 @@ News editors need a fast way to:
 - The system shall allow users to mark articles as new, archived, or deleted.
 - The system shall persist article status across sessions.
 - The system shall expose logs for crawl and search operations for debugging.
+- When reviewing a generated story, switching between Hindi and English shall switch the
+  story and every social media post together.
+- The review view shall warn when an article's AI output was cut off and needs to be
+  regenerated.
 
 ## 8. Non-Functional Requirements
 

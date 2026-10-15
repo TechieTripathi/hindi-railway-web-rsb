@@ -35,6 +35,8 @@ import warnings
 from datetime import datetime
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 # One level down from research/ now, so climb twice.
 _RESEARCH_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -84,13 +86,46 @@ def script_ratio(text):
     return d / (d + a) if (d + a) else 0.0
 
 
+class _LegacyTLSAdapter(HTTPAdapter):
+    """Accept the zone portals' old TLS 1.2 cipher suite.
+
+    The CRIS servers only offer AES128-GCM-SHA256. Python 3.13 with OpenSSL 3.5
+    no longer offers it by default, so every handshake fails with
+    SSLV3_ALERT_HANDSHAKE_FAILURE (curl still connects). `verify=False` does not
+    help: the certificate is not the problem, the cipher list is. Measured
+    2026-10-15.
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context(ciphers="DEFAULT")
+        # crawler._fetch passes verify=False, which a context with
+        # check_hostname on refuses. urllib3 still matches the hostname itself
+        # whenever verification is on, so nothing is lost.
+        ctx.check_hostname = False
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def zone_session():
+    """A requests session that can talk to the zone portals. Local to this
+    pipeline, so the wider cipher list never reaches other sites."""
+    session = requests.Session()
+    session.mount("https://", _LegacyTLSAdapter())
+    return session
+
+
 def crawl_zone(session, zone, per_zone=None, date_from=None, date_to=None,
-               min_body=None, verbose=True, delay=None):
+               min_body=None, verbose=True, delay=None, report=None):
     """Crawl one zone's Hindi listing and return article dicts.
 
     Reuses crawler._parse_listing / _parse_detail, which already handle the CRIS
     table markup, PDF-only releases, and the newest-first sort.
+
+    `report`, if given, is filled in with what an empty result alone cannot say:
+    "error" when the listing could not be fetched, and "newest" — the date of the
+    zone's newest release, even when the date window dropped it.
     """
+    report = {} if report is None else report
     code, name, url = zone["c"], zone["n"], zone["u"]
     base = crawler._get_base(url)
     # None means UNCAPPED unless the config toggle says otherwise.
@@ -103,9 +138,15 @@ def crawl_zone(session, zone, per_zone=None, date_from=None, date_to=None,
     try:
         items = crawler._parse_listing(crawler._fetch(session, url), base)
     except Exception as e:
+        report["error"] = str(e)
         if verbose:
-            print("  %-5s listing failed: %s" % (code, str(e)[:70]))
+            print("  %-5s WARNING listing failed: %s" % (code, str(e)[:70]))
         return out
+
+    dated = [it["date"] for it in items
+             if crawler._parse_date_sortkey(it["date"]) != (0, 0, 0)]
+    if dated:
+        report["newest"] = max(dated, key=crawler._parse_date_sortkey)
 
     df = crawler._parse_date_sortkey(date_from) if date_from else None
     dt = crawler._parse_date_sortkey(date_to) if date_to else None
@@ -191,7 +232,7 @@ def research_dedup(articles):
 
 def run_rsb_crawl(zone_codes=None, per_zone=None, date_from=None, date_to=None,
                   hindi_only=None, out_file=None, verbose=True, days=None,
-                  keywords=None, keyword_mode="narrow"):
+                  keywords=None, keyword_mode="narrow", report=None):
     """Crawl the Hindi edition of the RSB zone portals and write research JSON.
 
     hindi_only=True keeps only articles whose BODY is majority Devanagari, which
@@ -210,6 +251,11 @@ def run_rsb_crawl(zone_codes=None, per_zone=None, date_from=None, date_to=None,
     Pass days=0 for no date filter. Unlike the web side the zone listing carries
     the date, so filtering happens before any detail page is fetched — a narrow
     window here genuinely saves requests.
+
+    Raises RuntimeError when no zone listing could be fetched at all, so an
+    unreachable portal is not reported as "nothing published". `report`, if
+    given, receives "failed" ({zone: error}) and "newest" ((zone, date) of the
+    newest release seen, including ones outside the window).
     """
     zone_codes = CFG.DEFAULT_ZONE_CODES if zone_codes is None else zone_codes
     if per_zone is None:
@@ -229,18 +275,36 @@ def run_rsb_crawl(zone_codes=None, per_zone=None, date_from=None, date_to=None,
     else:
         window = Window(start=date_from, end=date_to)
 
-    session = requests.Session()
+    session = zone_session()
     articles = []
+    reports = {}
     if verbose:
         print("date window: %s | zones: %s"
               % (window.describe(), ",".join(z["c"] for z in zones)))
     for z in zones:
         if verbose:
             print("\n=== %s — %s ===" % (z["c"], z["n"]))
+        reports[z["c"]] = {}
         articles.extend(crawl_zone(session, z, per_zone=per_zone,
                                    date_from=date_from, date_to=date_to,
-                                   verbose=verbose))
+                                   verbose=verbose, report=reports[z["c"]]))
         time.sleep(CFG.SLEEP_LISTING)
+
+    failed = {c: r["error"] for c, r in reports.items() if "error" in r}
+    if zones and len(failed) == len(zones):
+        # Every listing failed: that is "could not look", not "nothing published".
+        # Raise so the step shows an error instead of writing an empty result.
+        code, err = next(iter(failed.items()))
+        raise RuntimeError("Could not reach any railway zone website — they may be "
+                           "down, or the connection is blocked. (%s: %s)" % (code, err[:200]))
+    if failed and verbose:
+        print("\nWARNING: %d of %d zone listing(s) could not be fetched: %s"
+              % (len(failed), len(zones), ", ".join(failed)))
+    if report is not None:
+        report["failed"] = failed
+        newest = [(c, r["newest"]) for c, r in reports.items() if "newest" in r]
+        if newest:
+            report["newest"] = max(newest, key=lambda cn: crawler._parse_date_sortkey(cn[1]))
 
     articles, dups = research_dedup(articles)
     if keywords:

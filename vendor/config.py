@@ -14,7 +14,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = "claude-haiku-4-5"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MAX_INPUT_CHARS = 6000
-MAX_OUTPUT_TOKENS = 3000
+MAX_OUTPUT_TOKENS = 8000   # 3000 cut off Hindi answers mid-JSON (Hindi costs ~2.8x the tokens)
 AI_CALL_DELAY = 2
 
 # --- Crawler ---
