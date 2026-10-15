@@ -58,7 +58,7 @@ would be discarded as duplicates permanently.
 - **Fixing the webapp.** These changes live in `research/` and are applied by runtime
   rebinding. Adopting them in the product is a separate decision.
 - **Multi-source consolidation.** Each story is generated from exactly one article body
-  (`engine.py:385` passes one title and one body). See §8.
+  (`engine.py:440` passes one title and one body). See §8.
 
 ---
 
@@ -118,10 +118,26 @@ Jansatta 265 → **2918–10857**.
   placeholder, PDF-only release, genuinely short page — rather than reporting one error.
 - **FR-10** The system shall dedupe **within a run only**, never touching the webapp's
   persistent `seen_articles.json`.
+- **FR-32** The system shall connect to zone portals that offer only a legacy TLS 1.2
+  cipher suite (`AES128-GCM-SHA256`), with the wider cipher list scoped to the
+  press-release crawler's own session.
+- **FR-33** The system shall report a crawl in which **no** zone listing could be fetched
+  as an error, never as an empty result, and shall name in the log each zone that failed
+  when only some did.
+- **FR-34** When the date window holds no releases, the system shall state the newest
+  release it saw, with its date and zone, so the user knows how far back to look. The
+  default window stays at 7 days.
 
 **Acceptance:** zones classified by measured Hindi coverage. *Measured:* CR/WR full Hindi;
 NR Hindi titles over English bodies; ECoR/SCR return the literal placeholder
 `"Add Hindi content here"`.
+
+**Acceptance (FR-32–34):** a crawl of the four default zones succeeds where it previously
+returned nothing. *Measured 2026-10-15:* with Python 3.13 / OpenSSL 3.5 every default zone
+failed the TLS handshake (`SSLV3_ALERT_HANDSHAKE_FAILURE`) while `curl` got HTTP 200, and
+the failure surfaced as "Nothing was found". After the fix, all 4 zones connect. The last
+7 days returned 3 NER releases, the last 30 days returned releases from all four zones,
+and an empty "Today" run reports "Newest press release: 06-10-2026 (CR)".
 
 ### 6.3 Devanagari preprocessing (`shared/`)
 
@@ -145,6 +161,18 @@ unchanged.
 - **FR-16** The system shall report how many articles hold an error placeholder rather than
   a story, and shall state explicitly when a run produced **zero** new stories because
   generation resumes by title.
+- **FR-35** The system shall detect a cut-off model answer, whether it stopped at
+  `max_tokens` or its JSON had to be closed by the parser, and shall flag it `truncated`.
+  It shall retry such an answer once, shall not backfill its `fact_score`, and shall redo
+  it on the next run instead of treating it as written. A regenerated article replaces
+  its earlier entry rather than being added beside it.
+
+**Acceptance (FR-35):** no stored generation has defaulted fields silently. *Measured
+2026-10-15:* at `MAX_OUTPUT_TOKENS = 3000`, **5 of 135** stored generations were cut off
+mid-answer. In one, the "General post" read only "उत्तर रेलवे" (11 chars), and
+`impact_reason`, `topics` and `fact_details` were empty, with a backfilled `fact_score` of
+30. The output budget is now 8000 tokens: Hindi costs about 2.8× the tokens of English, and
+one answer carries a full story, its translation and six posts.
 
 ### 6.5 Grounded scoring (`shared/grounding.py`)
 
@@ -180,6 +208,12 @@ impact agreement **12/31 (39%)**; two `score_report.py` runs byte-identical.
 - **FR-28** The system shall provide a browsable table of crawled articles — source,
   listing page, article URL, date, title, content excerpt — with a full-article view.
 - **FR-29** The system shall back up the existing crawl output before a crawl overwrites it.
+- **FR-36** On the side-by-side review, one language toggle shall switch the story **and**
+  all three social posts. Each language is labelled by the script detected in its own
+  text, not by the field it came from, because for an English source `*_translated` holds
+  the Hindi version.
+- **FR-37** The review shall warn when an article's AI answer was cut off, and shall point
+  to re-running "Write stories".
 
 ### 6.7 Reproducibility
 
@@ -248,8 +282,10 @@ over ट्रेन / ट्रेनें / ट्रेनों still fails
 | No ground truth | Validation is by proxy — discrimination, negative control, determinism. Shows the metrics *behave* better; does not prove them *correct* | A human-labelled gold set is the only fix |
 | `coverage_score` confounded by source shape | A timetable with 200+ numerals yields low coverage for a correct summary | Published with `source_numbers`; deliberately not folded into a single score |
 | `vendor/crawler.py:24` fetches with `verify=False` | TLS verification disabled for every zone request, warning suppressed; silently accepts any certificate | **Open.** Inherited by `rsb_search/` via `vendor/crawler._fetch` |
+| Zone portals offer only a legacy TLS 1.2 cipher | Modern OpenSSL refuses the handshake. Before FR-33, every zone then read as "nothing published" | The press-release crawler's session alone accepts the `DEFAULT` cipher list (`rsb_search/pipeline.py`, `zone_session`). An unreachable portal is now an error. The webapp's `crawler.py` still has the original problem |
+| Model answer cut off at the output-token limit | The parser closes the broken JSON. Later fields (posts, impact, topics, fact score) come back as defaults that look like real output | FR-35: detected, retried, flagged `truncated`, redone on the next run, and warned about on review. The webapp's `engine.py` still has the original problem |
 | `.env` committed by mistake | An `.env` with live keys reached a local commit once, while this repo was nested inside the webapp and its `.gitignore` was assumed to apply | `.env` is now the first entry in `.gitignore`; documented in [SETUP.md](SETUP.md) |
-| `fact_score` repaired by keyword matching | A score of exactly 70/50/30/15 may be a substring match on the model's own prose (`vendor/engine.py:427-435`), not a judgement | Documented in [METRICS.md](METRICS.md); `grounding_ceiling` is independent of it |
+| `fact_score` repaired by keyword matching | A score of exactly 70/50/30/15 may be a substring match on the model's own prose (`vendor/engine.py:467-475`), not a judgement | Documented in [METRICS.md](METRICS.md); `grounding_ceiling` is independent of it |
 
 ---
 
@@ -263,4 +299,12 @@ over ट्रेन / ट्रेनें / ट्रेनों still fails
    human judgement.
 4. **Zone coverage** — ECoR and SCR publish an untranslated placeholder. Do we drop them,
    or fall back to their English edition?
-5. **TLS** — pin a CA bundle, or scope the `verify=False` exemption to named hosts?
+5. **TLS** — pin a CA bundle, or scope the `verify=False` exemption to named hosts? The
+   legacy-cipher exemption (FR-32) raises the same question and could be scoped to
+   `*.indianrailways.gov.in` at the same time.
+6. **"Why this matters" in Hindi** — `impact_reason` is generated once, usually in English,
+   so the language toggle (FR-36) leaves it unchanged. A translated field would need a
+   prompt change and fresh generations.
+7. **Webapp parity** — FR-32–35 are fixed only in `research/`. `vendor/__init__.py` says
+   fixes are copied to the webapp's `crawler.py`, `engine.py` and `config.py` by hand.
+   Is that wanted?

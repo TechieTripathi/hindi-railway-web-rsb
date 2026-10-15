@@ -449,8 +449,8 @@ tr.is-ticked { background:var(--primary-soft) !important; }
 .tone-gen { --tone:#6c757d; } .tone-extra { --tone:var(--text-faint); }
 .tone-crawl { --tone:#6c757d; } .tone-ok { --tone:var(--success); }
 .outblock { border-left:3px solid var(--tone); border-bottom:1px solid var(--border); }
-.outblock > .fieldhead > strong { color:var(--tone); }
-.outblock > .fieldhead .swatch { display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--tone); flex:0 0 auto; }
+.outblock .fieldhead > strong { color:var(--tone); }
+.outblock .fieldhead .swatch { display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--tone); flex:0 0 auto; }
 .langtabs { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:10px 16px 0; }
 .stagepill { display:inline-flex; align-items:center; gap:7px; text-decoration:none; padding:5px 12px 5px 6px;
              border-radius:999px; font-size:var(--text-small); font-weight:500; border:1px solid var(--border);

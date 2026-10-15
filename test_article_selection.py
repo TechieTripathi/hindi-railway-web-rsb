@@ -585,6 +585,44 @@ class ArticleSelectionTests(unittest.TestCase):
                                            encoding="utf-8")
         self.assertEqual(ui._rows("web", "agency")[0]["ai_headline"], "रेलवे स्लीपर कोच जोड़ेगा")
 
+    def test_social_posts_carry_both_languages_for_the_toggle(self):
+        english_source = {"source_lang": "en",
+                          "social_twitter": "Railways adds sleeper coaches #Rail",
+                          "social_twitter_translated": "रेलवे स्लीपर कोच जोड़ेगा #Rail",
+                          "social_general": "Sleeper coaches arrive next year.",
+                          "social_general_translated": "Still English, not translated."}
+        posts = {p["label"]: p for p in ui._ai_social(english_source)}
+        # Labelled by the text, not the field: the Hindi post came from *_translated.
+        tw = posts["Twitter / X post"]["panels"]
+        self.assertEqual([(p["lang"], p["shown"]) for p in tw], [("hi", True), ("en", False)])
+        self.assertEqual(tw[0]["text"], "रेलवे स्लीपर कोच जोड़ेगा #Rail")
+        # A "translation" in the same language is dropped; the one post stays shown.
+        gen = posts["General post"]["panels"]
+        self.assertEqual([(p["lang"], p["shown"]) for p in gen], [("en", True)])
+        self.assertNotIn("Facebook post", posts)
+        # The page renders a panel per language, hidden ones marked hidden.
+        cfg = ui.PIPELINES["web"]["cfg"]
+        story = {"ai_headline": "Railways adds sleeper coaches",
+                 "ai_news_story": "Indian Railways will add sleeper coaches next year.",
+                 "ai_headline_translated": "रेलवे स्लीपर कोच जोड़ेगा",
+                 "ai_news_story_translated": "भारतीय रेलवे अगले साल स्लीपर कोच जोड़ेगा।",
+                 "fact_details": "ok", "topics": ["Operations"]}
+        Path(cfg.AGENCY_OUTPUT).write_text(
+            json.dumps([dict(self.arts[0], **english_source, **story)]), encoding="utf-8")
+        html = self.client.get("/verify/web/0?stage=agency").get_data(as_text=True)
+        self.assertIn('data-social-lang="hi"\n             >', html)
+        self.assertIn('data-social-lang="en"\n             hidden>', html)
+        self.assertIn('data-lang="hi"', html)                  # story tab carries its language
+        self.assertNotIn("answer was cut off", html)
+
+    def test_cut_off_answer_is_flagged_on_review(self):
+        cfg = ui.PIPELINES["web"]["cfg"]
+        art = dict(self.arts[0], ai_headline="रेलवे", truncated=True,
+                   ai_news_story="भारतीय रेलवे अगले साल स्लीपर कोच जोड़ेगा। " * 3)
+        Path(cfg.AGENCY_OUTPUT).write_text(json.dumps([art]), encoding="utf-8")
+        html = self.client.get("/verify/web/0?stage=agency").get_data(as_text=True)
+        self.assertIn("answer was cut off", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -137,7 +137,8 @@ Asked for in the prompt with a rubric ([engine.py:38-43](../vendor/engine.py#L38
 
 1. **It barely discriminates.** 5 distinct values across 31 articles, median 92.
 2. **A zero is silently overwritten by keyword matching**, not by the model
-   ([engine.py:427-435](../vendor/engine.py#L427-L435)). If `fact_score == 0` and a story exists:
+   ([engine.py:467-475](../vendor/engine.py#L467-L475)). If `fact_score == 0`, a story exists and the
+   answer was not cut off:
 
    ```
    'verified' / 'confirmed' / 'all major' in fact_details   -> 70

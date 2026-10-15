@@ -358,6 +358,11 @@ def _generated_count(path: str) -> int:
     return sum(1 for a in data if engine._is_real_story(a.get("ai_news_story")))
 
 
+def _complete_count(path: str) -> int:
+    """Articles `engine.run_generate` will not redo: real AND not cut off."""
+    return sum(1 for a in (_read_json(path) or []) if engine._is_done(a))
+
+
 BACKUP_DIR = os.path.join(config_web.OUTPUT_DIR, "backups")
 KEEP_BACKUPS = 10
 
@@ -874,6 +879,9 @@ _TEXT_FIELDS = [
     ("social_twitter", "social · twitter"),
     ("social_facebook", "social · facebook"),
     ("social_general", "social · general"),
+    ("social_twitter_translated", "social · twitter (translated)"),
+    ("social_facebook_translated", "social · facebook (translated)"),
+    ("social_general_translated", "social · general (translated)"),
     ("impact_reason", "impact reason"),
     ("fact_details", "fact_details (self-reported by the model)"),
     ("plagiarism_detail", "plagiarism_detail (computed locally)"),
@@ -984,9 +992,11 @@ def _run_estimate(pipeline: str) -> dict:
     """
     cfg = PIPELINES[pipeline]["cfg"]
     arts = _selected_articles(pipeline)
+    # engine._is_done, not _is_real_story: a cut-off answer is redone, so it
+    # costs a call like an unwritten one.
     done = {_resume_key(a.get("title"))
             for a in (_read_json(cfg.AGENCY_OUTPUT) or [])
-            if engine._is_real_story(a.get("ai_news_story"))}
+            if engine._is_done(a)}
     scored = {_resume_key(a.get("title")) for a in (_read_json(cfg.SCORED_OUTPUT) or [])}
     counts, calls, skipped, checked = {}, {}, {}, {}
     for m in clustering.MODES:
@@ -1204,8 +1214,18 @@ def _flow(name: str, open_step: str | None = None, mode: str | None = None) -> d
             found, _find_summary(name, (runs.get("crawl") or {}).get("params")),
             found_info["when"])
     elif found_info["exists"] and not f["error"]:
-        f["message"] = ("Nothing was found. Try a longer time range"
-                        + (" or other keywords." if name == "search" else "."))
+        crawl = runs.get("crawl") or {}
+        when = _find_summary(name, crawl.get("params")).split(" · ")[0]
+        hint = _NEWEST_HINT_RE.search(crawl.get("summary") or "")
+        if when == "any date":
+            f["message"] = "Nothing was found." + (
+                " Try other keywords." if name == "search" else "")
+        else:
+            f["message"] = ("Nothing was found for %s.%s Choose a longer range under "
+                            "“How recent?”%s"
+                            % (when if when == "today" else "the " + when,
+                               " " + hint.group(0) if hint else "",
+                               " or try other keywords." if name == "search" else ""))
 
     c = steps["choose"]
     if not found:
@@ -1362,12 +1382,19 @@ def _step_rsb_crawl(job: Job, p: dict) -> str:
                os.path.relpath(config_rsb.CRAWL_OUTPUT, _RESEARCH_DIR)))
     _backup(config_rsb.CRAWL_OUTPUT, job)
     _clear_downstream(job, "rsb")
+    report = {}
     arts = rsb_pipeline.run_rsb_crawl(
         zone_codes=zones, per_zone=n, hindi_only=hindi_only, days=days,
         keywords=kw, keyword_mode=kw_mode,
-        out_file=config_rsb.CRAWL_OUTPUT, verbose=True)
+        out_file=config_rsb.CRAWL_OUTPUT, verbose=True, report=report)
     _excluded_keys("rsb", arts, after_crawl=True)
-    return _crawl_summary(job, arts)
+    summary = _crawl_summary(job, arts)
+    if not arts and report.get("newest"):
+        # Zones publish a few releases a week, so an empty short window is normal.
+        # Saying when the last one came out tells the user how far back to look.
+        zone, date = report["newest"]
+        summary += " " + _NEWEST_HINT % (date, zone)
+    return summary
 
 
 def _step_search_crawl(job: Job, p: dict) -> str:
@@ -1389,6 +1416,12 @@ def _step_search_crawl(job: Job, p: dict) -> str:
         keyword_mode=kw_mode, out_file=config_search.CRAWL_OUTPUT, verbose=True)
     _excluded_keys("search", arts, after_crawl=True)
     return _crawl_summary(job, arts, generic_expected=PIPELINES["search"]["generic_expected"])
+
+
+#: Appended to an empty press-release crawl's summary, then lifted back out of the
+#: run record by `_flow` for the "Nothing was found" message.
+_NEWEST_HINT = "Newest press release: %s (%s)."
+_NEWEST_HINT_RE = re.compile(r"Newest press release: [^.]*\.")
 
 
 def _crawl_summary(job: Job, arts: list, generic_expected: bool = False) -> str:
@@ -1474,12 +1507,12 @@ def _step_generate(job: Job, p: dict, name: str) -> str:
         raise ValueError("unknown cluster mode %r" % mode)
     src = _cluster_input(job, cfg, mode)
 
-    before = _generated_count(cfg.AGENCY_OUTPUT)
+    before = _complete_count(cfg.AGENCY_OUTPUT)
     job.log("engine.run_generate(%s -> %s); resumes by title, %d already done"
             % (os.path.basename(src),
                os.path.basename(cfg.AGENCY_OUTPUT), before))
     arts = engine.run_generate(src, cfg.AGENCY_OUTPUT)
-    after = _generated_count(cfg.AGENCY_OUTPUT)
+    after = _complete_count(cfg.AGENCY_OUTPUT)
     if after == before:
         job.log("\n  NOTE: no new stories. engine skips titles already present in the "
                 "output file — delete %s to force a clean regeneration."
@@ -1604,9 +1637,12 @@ def _text_lang(text: str, fallback: str = "") -> str:
     return "hi" if deva >= latin else "en"
 
 AI_SOCIAL = [
-    {"field": "social_twitter", "label": "Twitter / X post", "tone": "tw"},
-    {"field": "social_facebook", "label": "Facebook post", "tone": "fb"},
-    {"field": "social_general", "label": "General post", "tone": "gen"},
+    {"field": "social_twitter", "translated": "social_twitter_translated",
+     "label": "Twitter / X post", "tone": "tw"},
+    {"field": "social_facebook", "translated": "social_facebook_translated",
+     "label": "Facebook post", "tone": "fb"},
+    {"field": "social_general", "translated": "social_general_translated",
+     "label": "General post", "tone": "gen"},
 ]
 
 #: Anything the model produced that is neither a story nor a social post.
@@ -1650,9 +1686,34 @@ def _ai_story_tabs(art: dict) -> list[dict]:
     return out
 
 
-def _ai_social(art: dict) -> list[dict]:
-    """The social posts that exist, each carrying its network colour."""
-    return [dict(s, text=art[s["field"]]) for s in AI_SOCIAL if art.get(s["field"])]
+def _ai_social(art: dict, show: str = "hi") -> list[dict]:
+    """The social posts that exist, each carrying its network colour and one
+    panel per language, so the story's language toggle switches them too.
+
+    Like the story tabs, each panel is labelled by the language detected in its
+    own text: for an English source `social_twitter` is the English post and
+    `social_twitter_translated` the Hindi one. A translation in the same language
+    as the original is dropped rather than shown as a second panel. The panel in
+    `show` (the story's first tab) starts visible, else the post's first panel.
+    """
+    src = art.get("source_lang") if art.get("source_lang") in LANG_NAMES else ""
+    other = {"hi": "en", "en": "hi"}
+    out = []
+    for s in AI_SOCIAL:
+        panels = []
+        for key, guess in ((s["field"], src), (s["translated"], other.get(src, ""))):
+            text = art.get(key) or ""
+            lang = _text_lang(text, guess)
+            if text and lang not in {p["lang"] for p in panels}:
+                panels.append({"lang": lang, "text": text, "chars": len(text)})
+        if not panels:
+            continue
+        panels.sort(key=lambda p: p["lang"] != "hi")
+        first = next((p for p in panels if p["lang"] == show), panels[0])
+        for p in panels:
+            p["shown"] = p is first
+        out.append(dict(s, panels=panels))
+    return out
 
 
 def _no_article(pipeline: str, stage: str, index: int, count: int, nav: str):
@@ -2249,6 +2310,7 @@ def verify(pipeline, index):
         return _no_article(pipeline, stage, index, len(arts), "verify")
     art = arts[index]
     listing, exact = _listing_for(art, _listing_fallback(pipeline))
+    story_tabs = _ai_story_tabs(art)
     return render_template(
         "verify.html", generic_expected=PIPELINES[pipeline].get("generic_expected", False), nav="verify", pipeline=pipeline,
         title=PIPELINES[pipeline]["title"], stage=stage,
@@ -2260,8 +2322,8 @@ def verify(pipeline, index):
         # template needs no special case for the common one-source article.
         source_parts=clustering.split_merged_body(art.get("body") or ""),
         cluster_links=art.get("cluster_links") or [],
-        story_tabs=_ai_story_tabs(art),
-        socials=_ai_social(art),
+        story_tabs=story_tabs,
+        socials=_ai_social(art, show=story_tabs[0]["lang"] if story_tabs else "hi"),
         extras=[(label, art[k], tone) for k, label, tone in AI_EXTRA if art.get(k)],
         scores=_scores(art),
         gate_failures=art.get("gate_failures") or [],
@@ -2276,6 +2338,7 @@ def verify(pipeline, index):
                  for k, src in enumerate(art.get("cluster_sources") or [])]
                 if (art.get("cluster_size") or 1) > 1 else [],
         has_ai=_has_story(art),
+        cut_off=_has_story(art) and engine._was_cut_off(art),
         file=os.path.relpath(_stage_path(pipeline, stage), _RESEARCH_DIR))
 
 

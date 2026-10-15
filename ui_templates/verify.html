@@ -149,6 +149,15 @@
         <a href="/panel/{{ pipeline }}?open=write">Write stories in step 3 →</a>
       </p>
     {% endif %}
+    {% if cut_off %}
+      <p class="warn small" style="padding:10px 16px; margin:0;
+                border-bottom:1px solid var(--border)">
+        The AI's answer was cut off before the end, so the later parts (posts,
+        “Why this matters”, topics) may be missing or incomplete.
+        <a href="/panel/{{ pipeline }}?open=write">Run “Write stories” again</a>
+        to redo it.
+      </p>
+    {% endif %}
     <div class="pane-scroll">
 
     {# ── The story, one language at a time ─────────────────────────────────
@@ -166,7 +175,7 @@
         <div class="langtabs" role="tablist" aria-label="Story language">
           {% for t in story_tabs %}
             <button type="button" class="langtab" role="tab"
-                    data-langtab="{{ t.key }}" title="{{ t.note }}"
+                    data-langtab="{{ t.key }}" data-lang="{{ t.lang }}" title="{{ t.note }}"
                     aria-selected="{{ 'true' if loop.first else 'false' }}"
                     aria-controls="lang-{{ t.key }}">{{ t.label }}</button>
           {% endfor %}
@@ -188,16 +197,23 @@
       </div>
     {% endif %}
 
-    {# ── Social posts, each in its own network's colour ────────────────────── #}
+    {# ── Social posts, each in its own network's colour ──────────────────────
+       One panel per language; the story's language toggle switches them by
+       detected language, so a post with only one language just stays shown. #}
     {% for sc in socials %}
       <div class="outblock tone-{{ sc.tone }}">
-        <div class="fieldhead">
-          <span class="swatch"></span>
-          <strong class="small">{{ sc.label }}</strong>
-          <span class="faint tiny">{{ sc.text|length }} chars</span>
+        {% for p in sc.panels %}
+        <div class="social-lang" data-social-lang="{{ p.lang }}"
+             {% if not p.shown %}hidden{% endif %}>
+          <div class="fieldhead">
+            <span class="swatch"></span>
+            <strong class="small">{{ sc.label }}</strong>
+            <span class="faint tiny">{{ p.chars }} chars</span>
+          </div>
+          <pre class="prose" style="padding:9px 16px 13px; margin:0; font-size:14px;
+                      line-height:1.75; white-space:pre-wrap">{{ p.text }}</pre>
         </div>
-        <pre class="prose" style="padding:9px 16px 13px; margin:0; font-size:14px;
-                    line-height:1.75; white-space:pre-wrap">{{ sc.text }}</pre>
+        {% endfor %}
       </div>
     {% endfor %}
 
@@ -273,10 +289,12 @@
   {% endif %}
 </section>
 <script>
-  // Language toggle for the story block. Uses `hidden` rather than a style
-  // change so a hidden panel is also hidden from assistive tech.
+  // Language toggle for the story block, which also switches the social posts
+  // below it to the same language. Uses `hidden` rather than a style change so
+  // a hidden panel is also hidden from assistive tech.
   document.querySelectorAll('[role="tablist"][aria-label="Story language"]').forEach(strip => {
     const scope = strip.closest('.outblock');
+    const pane = strip.closest('.pane');
     strip.querySelectorAll('.langtab').forEach(btn => {
       btn.addEventListener('click', () => {
         const want = btn.dataset.langtab;
@@ -284,6 +302,12 @@
           b.setAttribute('aria-selected', String(b === btn)));
         scope.querySelectorAll('[data-langpanel]').forEach(pn =>
           pn.hidden = pn.dataset.langpanel !== want);
+        // A post missing this language keeps showing what it has.
+        pane.querySelectorAll('.outblock').forEach(block => {
+          const panels = block.querySelectorAll('[data-social-lang]');
+          if (![...panels].some(pn => pn.dataset.socialLang === btn.dataset.lang)) return;
+          panels.forEach(pn => pn.hidden = pn.dataset.socialLang !== btn.dataset.lang);
+        });
       });
     });
   });

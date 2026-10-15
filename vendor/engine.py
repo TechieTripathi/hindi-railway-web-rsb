@@ -168,7 +168,11 @@ def _parse_ai_json(text):
     partial += '}' * max(0, open_braces)
     try:
         result = json.loads(partial)
-        return _validate_ai_result(result)
+        result = _validate_ai_result(result)
+        # Closing the JSON by hand only succeeds on a cut-off answer: every field
+        # after the cut is a default, not something the model wrote.
+        result['truncated'] = True
+        return result
     except json.JSONDecodeError:
         raise ValueError("Could not parse AI JSON output")
 
@@ -213,6 +217,38 @@ def _is_real_story(story):
     if not story or len(story) <= MIN_STORY_CHARS:
         return False
     return not story.startswith("Generation failed") and not story.startswith("[")
+
+
+def _was_cut_off(art):
+    """True if the model's answer for `art` stopped before the end.
+
+    Uses the stored `truncated` flag. Articles generated before that flag existed
+    fall back to its footprint: a real story but `fact_details` and `topics`, the
+    last fields of the answer, written out empty. A complete answer always fills
+    them; a record without the keys at all was not written by run_generate.
+    """
+    if 'truncated' in art:
+        return bool(art['truncated'])
+    return (_is_real_story(art.get('ai_news_story'))
+            and 'fact_details' in art and 'topics' in art
+            and not art['fact_details'] and not art['topics'])
+
+
+def _is_done(art):
+    """True if `art` needs no further generation: a real, complete answer.
+    A cut-off answer is redone on the next run rather than kept forever."""
+    return _is_real_story(art.get('ai_news_story')) and not _was_cut_off(art)
+
+
+def _title_key(art):
+    return re.sub(r'\s+', ' ', art.get('title', '').lower().strip())
+
+
+def _merge(existing, new):
+    """`existing` plus `new`, where a new real story replaces the existing entry
+    with the same title instead of sitting next to it."""
+    replaced = {_title_key(a) for a in new if _is_real_story(a.get('ai_news_story'))}
+    return [a for a in existing if _title_key(a) not in replaced] + list(new)
 
 
 def _compute_plagiarism(source_text, ai_text, ngram_size=4):
@@ -315,7 +351,14 @@ def generate_news(title, body):
             resp.raise_for_status()
         data = resp.json()
         text = data.get("content", [{}])[0].get("text", "")
-        return _parse_ai_json(text)
+        result = _parse_ai_json(text)
+        if data.get("stop_reason") == "max_tokens":
+            # The parser can still "repair" a cut-off answer into valid JSON, with
+            # the later fields (social posts, impact, topics) silently defaulted.
+            print("  WARNING: answer cut off at max_tokens ({}) for '{}'".format(
+                MAX_OUTPUT_TOKENS, title[:50]))
+            result['truncated'] = True
+        return result
     except Exception as e:
         print("AI error for '{}': {}".format(title[:50], str(e)[:200]))
         return _empty_result(title, "Generation failed: {}".format(str(e)[:100]))
@@ -348,11 +391,7 @@ def run_generate(input_file=None, output_file=None):
         except (json.JSONDecodeError, IOError):
             existing = []
 
-    done_keys = set()
-    for a in existing:
-        if _is_real_story(a.get('ai_news_story')):
-            key = re.sub(r'\s+', ' ', a.get('title', '').lower().strip())
-            done_keys.add(key)
+    done_keys = {_title_key(a) for a in existing if _is_done(a)}
 
     to_generate = []
     # Load article status to skip deleted articles
@@ -402,8 +441,8 @@ def run_generate(input_file=None, output_file=None):
         for attempt in range(2):
             result = generate_news(art['title'], art.get('body', ''))
             story = result.get('ai_news_story', '')
-            # Check if generation actually succeeded
-            if _is_real_story(story):
+            # Check if generation actually succeeded, and was not cut off
+            if _is_real_story(story) and not result.get('truncated'):
                 break
             if attempt == 0:
                 print("  Retrying generation (attempt {} failed)...".format(attempt + 1))
@@ -411,6 +450,7 @@ def run_generate(input_file=None, output_file=None):
         
         for field in _FIELDS:
             art[field] = result.get(field, '' if isinstance(result.get(field), str) else result.get(field, []) if field == 'topics' else result.get(field, 0) if field == 'fact_score' else result.get(field, ''))
+        art['truncated'] = bool(result.get('truncated'))
         # Backwards compat
         art.setdefault('social_post', art.get('social_twitter', ''))
         # Plagiarism check: compare source body vs AI story
@@ -424,7 +464,9 @@ def run_generate(input_file=None, output_file=None):
         has_body = len(art.get('body', '')) > 100
         story_ok = art.get('ai_news_story', '') and not art['ai_news_story'].startswith('Generation')
         
-        if fs == 0 and story_ok:
+        # A cut-off answer lost fact_score along with everything after it; a
+        # backfilled 30 would read as a real (low) score.
+        if fs == 0 and story_ok and not art['truncated']:
             if 'verified' in fd or 'confirmed' in fd or 'all major' in fd:
                 art['fact_score'] = 70
             elif has_body and ('from source' in fd or 'based on' in fd):
@@ -435,7 +477,7 @@ def run_generate(input_file=None, output_file=None):
                 art['fact_score'] = 15  # Headline only
         if i < total - 1:
             time.sleep(AI_CALL_DELAY)
-        _save_partial(existing + to_generate[:i + 1], dst)
+        _save_partial(_merge(existing, to_generate[:i + 1]), dst)
 
     # Filter out articles with failed generation before saving
     successful = []
@@ -448,7 +490,7 @@ def run_generate(input_file=None, output_file=None):
 
     _update_status("AI generation complete. {} new + {} existing.".format(len(successful), len(existing)), total, total)
 
-    final = existing + successful
+    final = _merge(existing, successful)
     fd, tmp = tempfile.mkstemp(suffix='.json', dir=os.path.dirname(dst) or '.')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
